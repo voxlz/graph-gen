@@ -1,0 +1,23 @@
+title "Disconnected components + extreme aspect ratios"
+
+// Two components with no edge between them (tests disconnected-graph handling),
+// plus a node with a very long label (extreme aspect ratio).
+
+nodes {
+    box longLabel: "This is an extremely long single-line label to stress width"
+    box compAe: "A"
+    box compAb: "B"
+    box compBx: "X"
+    box compBy: "Y"
+}
+
+edges {
+    compAe --- compAb
+    compBx --- compBy
+    longLabel --- compAe
+}
+
+constraints {
+    compAb right compAe
+    compBy below compBx
+}

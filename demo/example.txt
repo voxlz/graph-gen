@@ -1,0 +1,60 @@
+// A mix of architecture (plain links) and a labelled use-case flow, packing
+// every node shape, several connector styles, a boundary, a group and an
+// alignment constraint into one concise diagram.
+
+// shapes: optional per-graph style overrides (here, a light fill for circles).
+shapes {
+    circle {
+        color "#EAF4FF"
+    }
+}
+
+// nodes: the box/circle/actor/database shapes plus the boundaries and groups
+// that contain them.
+nodes {
+    actor customer: "Customer"
+    box web: "Web App"
+    boundary cloud: "Cloud VPC" {
+        circle api: "Checkout API"
+        group core {
+            circle payments: "Payment Service"
+            circle orders: "Order Service"
+        }
+        boundary container: "Filesystem" {
+            database db: "PostgreSQL"
+            database cache: "Redis"
+        }
+    }
+    box stripe: "Stripe"
+    actor attacker: "Attacker"
+}
+
+// edges: connections between nodes; labelled ones trace the numbered flow,
+// plain ones show static architecture links.
+edges {
+    customer --> web: "1. checkout"
+    web --> api: "2. POST /pay {token}"
+    api --> payments: "3. charge"
+    api --> orders: "4. create order"
+    payments --> stripe: "5. charge card"
+    payments --- db
+    orders --- db
+    api --- cache
+    attacker ..> api: "spoofed request"
+}
+
+// constraints: relative-placement rules the layout solver must satisfy.
+constraints {
+    customer top web
+    web top api
+    core right api
+    payments top orders
+    db bottom api
+    cache bottom api
+    cache left db
+    orders left payments
+    orders bottom api
+    stripe right payments
+    attacker left api
+    align row db cache
+}

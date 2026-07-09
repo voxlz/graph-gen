@@ -1,0 +1,35 @@
+graph {
+    nodeGap 50
+    minGap 20
+}
+
+nodes {
+    group topRow {
+        box boxNode: "Box"
+        circle circleNode: "Circle"
+        database dbNode: "Database"
+        actor actorNode: "Actor"
+    }
+    group bottomRow {
+        boundary boundaryNode: "Boundary" {
+            box inside: "Inside"
+            boundary innerBoundary: "Nested boundary" {
+                box deep: "Deep"
+            }
+        }
+    }
+}
+
+constraints {
+    // top row left-to-right, aligned on one horizontal line
+    boxNode left circleNode
+    circleNode left actorNode
+    actorNode right dbNode
+    align row boxNode circleNode actorNode dbNode
+
+    // boundary below the shapes, aligned on a shared vertical line
+    topRow top bottomRow
+    align row inside deep
+    inside left dbNode
+    inside near circleNode
+}

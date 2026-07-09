@@ -1,0 +1,59 @@
+title "Bookstore - Scope"
+
+nodes {
+    box customer: "Customer"
+    actor attacker: "External Attacker"
+
+    boundary cloud: "Cloud VPC" {
+        boundary docker: "Container Network" {
+            circle gateway: "API Gateway"
+            circle catalog: "Catalog Service"
+            circle orders: "Order Service"
+            database postgres: "PostgreSQL"
+            database cache: "Redis Cache"
+            actor rogue: "Compromised Container"
+        }
+
+        group external {
+            box payments: "Payment Provider"
+            box email: "Email Service"
+            box shipping: "Shipping API"
+        }
+    }
+}
+
+edges {
+    customer --- gateway
+    gateway --- catalog
+    gateway --- orders
+    catalog --- postgres
+    catalog --- cache
+    orders --- postgres
+    orders --- payments
+    orders --- email
+    orders --- shipping
+}
+
+constraints {
+    // groups side by side
+    external right docker
+
+    // services stacked
+    gateway top catalog
+    catalog top orders
+
+    // stores to the right of the gateway
+    postgres right gateway
+    cache bottom postgres
+
+    // external providers as a column
+    payments top email
+    email top shipping
+
+    // client and attacker to the left
+    customer left gateway
+    attacker left customer
+
+    // compromised container sits below the order service
+    rogue bottom orders
+}

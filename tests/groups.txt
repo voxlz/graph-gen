@@ -1,0 +1,31 @@
+title "Group constraints"
+
+// Constraints may reference boundaries (groups), not just nodes. A group rule
+// is expanded into member-level separations, so the whole group is ordered
+// relative to another group or node.
+
+nodes {
+    boundary groupA: "Group A" {
+        box a1: "A1"
+        box a2: "A2"
+        circle a3: "A3"
+    }
+    boundary groupB: "Group B" {
+        box b1: "B1"
+        box b2: "B2"
+        circle b3: "B3"
+    }
+    box lone: "Lone Node"
+}
+
+edges {
+    a1 --- b1
+    a2 --- b2
+    a3 --- b3
+    lone --- a1
+}
+
+constraints {
+    groupA top groupB   // the whole of Group A sits left of the whole of Group B
+    lone top groupA      // a node placed above an entire group
+}

@@ -1,0 +1,82 @@
+graph {
+    nodeGap 20
+}
+
+// Each pair of boxes is joined by one connector; the matching code line shows
+// the exact DSL text. The eight pairs sit in two aligned columns of four.
+
+nodes {
+    // two side-by-side blocks, each a column of four A -> B pairs
+    group block1 {
+        box a1: "A1"
+        box b1: "B1"
+        box a2: "A2"
+        box b2: "B2"
+        box a3: "A3"
+        box b3: "B3"
+        box a4: "A4"
+        box b4: "B4"
+    }
+    group block2 {
+        box a5: "A5"
+        box b5: "B5"
+        box a6: "A6"
+        box b6: "B6"
+        box a7: "A7"
+        box b7: "B7"
+        box a8: "A8"
+        box b8: "B8"
+    }
+}
+
+edges {
+    a1 --> b1
+    a2 <-- b2
+    a3 <--> b3
+    a4 --- b4
+    a5 ... b5
+    a6 ..> b6
+    a7 <.. b7
+    a8 <..> b8
+}
+
+constraints {
+    // first block of pairs on the left, second block on the right
+    block1 left block2
+
+    // line the two blocks up row-by-row
+    align row a1 a5
+    align row a2 a6
+    align row a3 a7
+    align row a4 a8
+
+    // keep every column vertically aligned
+    align col a1 a2 a3 a4
+    align col b1 b2 b3 b4
+    align col a5 a6 a7 a8
+    align col b5 b6 b7 b8
+
+    // block 1: B right of each A, pairs stacked top-to-bottom
+    a1 left b1
+    a2 left b2
+    a3 left b3
+    a4 left b4
+    a1 top a2
+    a2 top a3
+    a3 top a4
+    b1 top b2
+    b2 top b3
+    b3 top b4
+
+    // block 2: same, for the remaining four pairs
+    a5 left b5
+    a6 left b6
+    a7 left b7
+    a8 left b8
+    a5 top a6
+    a6 top a7
+    a7 top a8
+    b5 top b6
+    b6 top b7
+    b7 top b8
+}

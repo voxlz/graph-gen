@@ -1,0 +1,12 @@
+node_modules
+*.png
+out
+renders
+.git
+tests
+example
+
+# Real (internal) threat models and use cases — never ship these in an image.
+scopes
+usecases
+graph.txt

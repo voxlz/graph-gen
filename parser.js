@@ -1,0 +1,414 @@
+// parser.js
+// Parses the graph DSL (*.txt) into the intermediate JSON representation
+// consumed by index.js. The intermediate shape mirrors parsedGraphExample.json:
+//
+//   {
+//     graph:       { title, minGap, lines },
+//     shapes:      { <shapeName>: { ...styleOverrides } },
+//     nodes:       [ { id, label, shape, parent } ],
+//     boundaries:  [ { id, label, parent } ],
+//     edges:       [ { source, target, label, arrowSource, arrowTarget, lineStyle } ],
+//     constraints: [ { type, a, b } ]
+//   }
+//
+// The DSL is intentionally forgiving: unknown lines are warned about and skipped
+// rather than aborting the whole parse.
+
+"use strict";
+
+// --- comment stripping (string-aware) ---------------------------------------
+// Removes // line comments and /* */ block comments without touching text that
+// lives inside double-quoted strings.
+function stripComments(text) {
+  let out = "";
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (inLine) {
+      if (c === "\n") {
+        inLine = false;
+        out += c;
+      }
+      continue;
+    }
+    if (inBlock) {
+      if (c === "*" && n === "/") {
+        inBlock = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === '"' && text[i - 1] !== "\\") inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      inLine = true;
+      i++;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      inBlock = true;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+// --- balanced-brace block extraction ----------------------------------------
+// Given text and the index of an opening "{", returns { body, end } where body
+// is the text between the braces and end is the index just past the closing "}".
+function extractBlock(text, openIdx) {
+  let depth = 0;
+  let inString = false;
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '"' && text[i - 1] !== "\\") inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        return { body: text.slice(openIdx + 1, i), end: i + 1 };
+      }
+    }
+  }
+  throw new Error("Unbalanced braces in DSL block");
+}
+
+// --- id slugification for label-only declarations ---------------------------
+function slug(label) {
+  const s = label
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((w, i) => (i === 0 ? w : w[0].toUpperCase() + w.slice(1)))
+    .join("");
+  return s || "node";
+}
+
+// --- node/boundary header parsing -------------------------------------------
+// Accepts: `id`, `id: "label"`, `id: label`, `"label" as id`, `"label"`.
+function parseHeader(header) {
+  const h = header.trim();
+  let m;
+  if ((m = h.match(/^"(.+)"\s+as\s+(\S+)$/))) return { id: m[2], label: m[1] };
+  if ((m = h.match(/^(\S+)\s*:\s*"(.+)"$/))) return { id: m[1], label: m[2] };
+  if ((m = h.match(/^(\S+)\s*:\s*(.+)$/)))
+    return { id: m[1], label: m[2].trim() };
+  if ((m = h.match(/^"(.+)"$/))) {
+    const label = m[1];
+    return { id: slug(label), label };
+  }
+  if ((m = h.match(/^(\S+)$/))) return { id: m[1], label: m[1] };
+  return null;
+}
+
+// --- nodes block (recursive, handles nested boundaries) ---------------------
+function parseNodesBlock(body, parent, nodes, boundaries, warnings) {
+  let i = 0;
+  while (i < body.length) {
+    // find the next non-whitespace
+    while (i < body.length && /\s/.test(body[i])) i++;
+    if (i >= body.length) break;
+
+    // read the statement header up to a "{" (boundary) or newline (leaf)
+    let j = i;
+    let braceIdx = -1;
+    let inString = false;
+    while (j < body.length) {
+      const c = body[j];
+      if (inString) {
+        if (c === '"' && body[j - 1] !== "\\") inString = false;
+      } else if (c === '"') {
+        inString = true;
+      } else if (c === "{") {
+        braceIdx = j;
+        break;
+      } else if (c === "\n") {
+        break;
+      }
+      j++;
+    }
+
+    const rawHeader = body.slice(i, braceIdx === -1 ? j : braceIdx).trim();
+    if (!rawHeader) {
+      i = j + 1;
+      continue;
+    }
+
+    const spaceIdx = rawHeader.search(/\s/);
+    const shape = (
+      spaceIdx === -1 ? rawHeader : rawHeader.slice(0, spaceIdx)
+    ).trim();
+    const rest = spaceIdx === -1 ? "" : rawHeader.slice(spaceIdx).trim();
+
+    if (braceIdx !== -1) {
+      // boundary / group with children. `group` behaves like a boundary for
+      // layout and constraints but is not drawn (no border, no label).
+      const parsed = parseHeader(rest) || {
+        id: slug(rest || "boundary"),
+        label: rest,
+      };
+      boundaries.push({
+        id: parsed.id,
+        label: parsed.label,
+        shape,
+        parent,
+        draw: shape !== "group",
+      });
+      const { body: inner, end } = extractBlock(body, braceIdx);
+      parseNodesBlock(inner, parsed.id, nodes, boundaries, warnings);
+      i = end;
+    } else {
+      const parsed = parseHeader(rest);
+      if (!parsed) {
+        warnings.push(`Could not parse node declaration: "${rawHeader}"`);
+      } else {
+        nodes.push({ id: parsed.id, label: parsed.label, shape, parent });
+      }
+      i = j + 1;
+    }
+  }
+}
+
+// --- shapes block (style overrides expressed in the DSL) --------------------
+function parseShapesBlock(body, shapes, warnings) {
+  let i = 0;
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++;
+    if (i >= body.length) break;
+
+    // shapeName { ... }
+    let j = i;
+    while (j < body.length && !/\s|\{/.test(body[j])) j++;
+    const shapeName = body.slice(i, j).trim();
+    while (j < body.length && /\s/.test(body[j])) j++;
+    if (body[j] !== "{") {
+      warnings.push(`Expected "{" after shape "${shapeName}" in shapes block`);
+      i = j + 1;
+      continue;
+    }
+    const { body: inner, end } = extractBlock(body, j);
+    const style = {};
+    for (const line of inner.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      const m = t.match(/^(\w+)\s+"?([^"]*)"?$/);
+      if (m) {
+        let val = m[2].trim();
+        if (/^-?\d+(\.\d+)?$/.test(val)) val = Number(val);
+        style[m[1]] = val;
+      } else {
+        warnings.push(`Could not parse style line: "${t}"`);
+      }
+    }
+    shapes[shapeName] = { ...(shapes[shapeName] || {}), ...style };
+    i = end;
+  }
+}
+
+// --- graph settings block (key value pairs) ---------------------------------
+function parseSettingsBlock(body, target, warnings) {
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(\w+)\s+"?([^"]*)"?$/);
+    if (!m) {
+      warnings.push(`Could not parse graph setting: "${line}"`);
+      continue;
+    }
+    let val = m[2].trim();
+    if (/^-?\d+(\.\d+)?$/.test(val)) val = Number(val);
+    target[m[1]] = val;
+  }
+}
+
+// --- edges block ------------------------------------------------------------
+function parseEdgesBlock(body, edges, warnings) {
+  // Track edges by unordered node pair so a second edge between the same two
+  // nodes is merged into the first (rather than silently overriding it):
+  // arrows are combined (bidirectional if opposite) and labels are joined with
+  // a newline into a multi-line label.
+  const byPair = new Map();
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // optional label suffix: ": ..." (quoted or not)
+    let label = "";
+    let core = line;
+    const labelMatch = line.match(/:\s*(?:"([^"]*)"|(.+))\s*$/);
+    if (labelMatch) {
+      label = (labelMatch[1] ?? labelMatch[2] ?? "").trim();
+      core = line.slice(0, labelMatch.index).trim();
+    }
+
+    const m = core.match(/^(\S+)\s+([<]?[-.]{2,}[>]?)\s+(\S+)$/);
+    if (!m) {
+      warnings.push(`Could not parse edge: "${line}"`);
+      continue;
+    }
+    const [, source, connector, target] = m;
+    if (source === target) {
+      throw new Error(`Edge from a node to itself is not supported: "${line}"`);
+    }
+    const edge = {
+      source,
+      target,
+      label,
+      arrowSource: connector.startsWith("<"),
+      arrowTarget: connector.endsWith(">"),
+      lineStyle: connector.includes(".") ? "dotted" : "solid",
+    };
+
+    const key = [source, target].slice().sort().join("\u0000");
+    const existing = byPair.get(key);
+    if (existing) {
+      // map the new edge's arrows onto the existing edge's orientation
+      const reversed =
+        edge.source === existing.target && edge.target === existing.source;
+      const atSource = reversed ? edge.arrowTarget : edge.arrowSource;
+      const atTarget = reversed ? edge.arrowSource : edge.arrowTarget;
+      existing.arrowSource = existing.arrowSource || atSource;
+      existing.arrowTarget = existing.arrowTarget || atTarget;
+      if (edge.label) {
+        existing.label = existing.label
+          ? `${existing.label}\n${edge.label}`
+          : edge.label;
+      }
+      warnings.push(
+        `merged duplicate edge ${source} <-> ${target} (arrows + labels combined)`,
+      );
+    } else {
+      edges.push(edge);
+      byPair.set(key, edge);
+    }
+  }
+}
+
+// --- constraints block ------------------------------------------------------
+const DIRECTIONS = new Set([
+  "top",
+  "bottom",
+  "left",
+  "right",
+  "topleft",
+  "topright",
+  "bottomleft",
+  "bottomright",
+  "near",
+  // back-compat synonyms
+  "above",
+  "below",
+]);
+
+function normalizeDir(dir) {
+  const d = dir.toLowerCase();
+  if (d === "above") return "top";
+  if (d === "below") return "bottom";
+  return d;
+}
+
+function parseConstraintsBlock(body, constraints, warnings) {
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // alignment: `align <row|col> <id> <id> [<id> ...]`
+    //   row / horizontal / y -> share a horizontal line (same y)
+    //   col / column / vertical / x -> share a vertical line (same x)
+    const tokens = line.split(/\s+/);
+    if (tokens[0].toLowerCase() === "align") {
+      const mode = (tokens[1] || "").toLowerCase();
+      const ids = tokens.slice(2);
+      let axis = null;
+      if (["row", "horizontal", "y"].includes(mode)) axis = "y";
+      else if (["col", "column", "vertical", "x"].includes(mode)) axis = "x";
+      if (!axis) {
+        warnings.push(`Unknown align mode "${tokens[1]}" in: "${line}"`);
+        continue;
+      }
+      if (ids.length < 2) {
+        warnings.push(`align needs at least two ids in: "${line}"`);
+        continue;
+      }
+      constraints.push({ type: "align", axis, ids });
+      continue;
+    }
+
+    const m = line.match(/^(\S+)\s+(\w+)\s+(\S+)$/);
+    if (!m) {
+      warnings.push(`Could not parse constraint: "${line}"`);
+      continue;
+    }
+    const [, a, dir, b] = m;
+    if (!DIRECTIONS.has(dir.toLowerCase())) {
+      warnings.push(`Unknown constraint direction "${dir}" in: "${line}"`);
+      continue;
+    }
+    constraints.push({ type: normalizeDir(dir), a, b });
+  }
+}
+
+// --- top-level parse --------------------------------------------------------
+function parseGraphText(text) {
+  const cleaned = stripComments(text);
+  const warnings = [];
+
+  const result = {
+    graph: { title: "", minGap: null, lines: "direct" },
+    shapes: {},
+    nodes: [],
+    boundaries: [],
+    edges: [],
+    constraints: [],
+  };
+
+  // title "..."
+  const titleMatch = cleaned.match(/(^|\n)\s*title\s+"([^"]*)"/);
+  if (titleMatch) result.graph.title = titleMatch[2];
+
+  // import "..." directives — pull in another graph's nodes / boundaries /
+  // constraints so a file can reference them and add edges on top.
+  result.imports = [];
+  const importRe = /(^|\n)\s*import\s+"([^"]*)"/g;
+  let im;
+  while ((im = importRe.exec(cleaned)) !== null) result.imports.push(im[2]);
+
+  // named blocks: name { ... }
+  const blockNames = ["graph", "shapes", "nodes", "edges", "constraints"];
+  for (const name of blockNames) {
+    const re = new RegExp(`(^|\\n)\\s*${name}\\s*\\{`);
+    const match = cleaned.match(re);
+    if (!match) continue;
+    const openIdx = cleaned.indexOf("{", match.index);
+    const { body } = extractBlock(cleaned, openIdx);
+    if (name === "graph") parseSettingsBlock(body, result.graph, warnings);
+    else if (name === "shapes") parseShapesBlock(body, result.shapes, warnings);
+    else if (name === "nodes")
+      parseNodesBlock(body, null, result.nodes, result.boundaries, warnings);
+    else if (name === "edges") parseEdgesBlock(body, result.edges, warnings);
+    else if (name === "constraints")
+      parseConstraintsBlock(body, result.constraints, warnings);
+  }
+
+  result.warnings = warnings;
+  return result;
+}
+
+module.exports = { parseGraphText, stripComments };

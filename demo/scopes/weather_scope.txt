@@ -1,0 +1,41 @@
+title "Weather API - Scope"
+
+nodes {
+    box client: "API Client"
+    actor attacker: "External Attacker"
+
+    boundary vpc: "Service VPC" {
+        circle api: "Weather API"
+        database cache: "Redis Cache"
+        database tsdb: "Time-series DB"
+    }
+
+    group providers {
+        box noaa: "NOAA Feed"
+        box satellite: "Satellite Provider"
+    }
+}
+
+edges {
+    client --- api
+    api --- cache
+    api --- tsdb
+    api --- noaa
+    api --- satellite
+}
+
+constraints {
+    // provider group to the right of the VPC
+    providers right vpc
+
+    // stores next to the API
+    cache right api
+    cache top tsdb
+
+    // client and attacker to the left
+    client left api
+    attacker left client
+
+    // providers stacked
+    noaa top satellite
+}

@@ -1,0 +1,17 @@
+import "../scopes/bookstore_scope.txt"
+
+title "Bookstore - UC2 - Track a shipment"
+
+graph {
+    nodeGap 150
+}
+
+edges {
+    customer --> gateway: "1. GET /orders/{id}/tracking {cookie:auth}"
+    gateway --> orders: "2. get order {id}"
+    orders --> postgres: "3. READ {order, shipment ref}"
+    orders --> shipping: "4. GET tracking {shipment ref}"
+    shipping --> orders: "5. Return {status, ETA}"
+    orders --> gateway: "6. Return {tracking}"
+    gateway --> customer: "7. Return {status + ETA}"
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Generated output
+renders/
+output.png
+*.png
+
+# ...except the showcase images embedded in the README.
+!docs/
+!docs/*.png
+
+# Real (internal) threat models and use cases — not for public sharing.
+# Demonstration equivalents live under demo/ and ARE tracked.
+# Leading slash anchors these to the repo root so demo/scopes and
+# demo/usecases stay tracked.
+/scopes/
+/usecases/
+/example/
+/graph.txt
+
+# OS / editor noise
+.DS_Store

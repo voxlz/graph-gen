@@ -1,0 +1,17 @@
+import "../scopes/weather_scope.txt"
+
+title "Weather API - UC1 - Fetch current conditions"
+
+graph {
+    nodeGap 150
+}
+
+edges {
+    client --> api: "1. GET /current {lat, lon, apikey}"
+    api --> cache: "2. READ {recent reading}"
+    api --> noaa: "3. GET observations {station}"
+    noaa --> api: "4. Return {raw observations}"
+    api --> tsdb: "5. WRITE {normalized reading}"
+    api --> cache: "6. WRITE {cache reading, ttl:300}"
+    api --> client: "7. Return {temperature, wind, humidity}"
+}

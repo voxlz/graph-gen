@@ -1,0 +1,71 @@
+nodes {
+    // directional constraints: one node per compass point around a center
+    group compass {
+        circle center: "Center"
+        box n: "North"
+        box s: "South"
+        box e: "East"
+        box w: "West"
+        box ne: "North-East"
+        box nw: "North-West"
+        box se: "South-East"
+        box sw: "South-West"
+    }
+
+    // the remaining constraint types, shown to the right of the compass
+    group extras {
+        circle hub: "Hub"
+        box orbit: "near"
+
+        box rowA: "align row"
+        box rowB: "align row"
+
+        box colA: "align col"
+        box colB: "align col"
+    }
+}
+
+edges {
+    center --- n
+    center --- s
+    center --- e
+    center --- w
+    center --- ne
+    center --- nw
+    center --- se
+    center --- sw
+
+    hub --- orbit
+    rowA --- rowB
+    colA --- colB
+}
+
+constraints {
+    // eight directions around the center
+    n top center
+    s bottom center
+    w left center
+    e right center
+    nw topLeft center
+    ne topRight center
+    sw bottomLeft center
+    se bottomRight center
+
+    // place the extras cluster to the right of the whole compass
+    compass left extras
+
+    // near: pulls a node close to another
+    orbit near hub
+
+    // align row: keeps nodes on a shared horizontal line
+    rowA left rowB
+    align row rowA rowB
+
+    // align col: keeps nodes on a shared vertical line
+    colA top colB
+    align col colA colB
+
+    // stack the three extra demos vertically
+    hub top rowA
+    rowB top colA
+}

@@ -1,0 +1,15 @@
+{
+  "name": "graphgen",
+  "version": "1.0.0",
+  "description": "Constraint-based graph layout -> PNG renderer",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "webcola": "^3.4.0"
+  }
+}
