@@ -4,9 +4,7 @@ Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https:
 
 ## Example
 
-<table>
-<tr>
-<td>
+![Checkout example](docs/example.png)
 
 ```text
 // optional per-graph style overrides (here, a light fill for circles).
@@ -67,15 +65,6 @@ constraints {
 }
 ```
 
-</td>
-<td valign="top">
-
-<img src="docs/example.png" alt="Checkout example" width="1280">
-
-</td>
-</tr>
-</table>
-
 ## Install and run (Docker)
 
 The recommended way to run `graphgen` is via Docker — no local Node or native
@@ -111,9 +100,7 @@ docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style
 
 Declare nodes. These are the elements that will make up your graph:
 
-<table>
-<tr>
-<td>
+![Node shapes](docs/shapes.png)
 
 ```text
 nodes {
@@ -130,22 +117,11 @@ nodes {
 }
 ```
 
-</td>
-<td valign="top">
-
-<img src="docs/shapes.png" alt="Node shapes" width="750">
-
-</td>
-</tr>
-</table>
-
 ### Edges
 
 Connect nodes together with edges:
 
-<table>
-<tr>
-<td>
+![Edge connectors](docs/edges.png)
 
 ```text
 edges {
@@ -160,22 +136,11 @@ edges {
 }
 ```
 
-</td>
-<td valign="top">
-
-<img src="docs/edges.png" alt="Edge connectors" width="750">
-
-</td>
-</tr>
-</table>
-
 ### Constraints
 
 Apply alignment constraints and relationships between your nodes to force graph to look a certain way:
 
-<table>
-<tr>
-<td>
+![Constraints](docs/compass.png)
 
 ```text
 constraints {
@@ -196,15 +161,6 @@ constraints {
 }
 ```
 
-</td>
-<td valign="top">
-
-<img src="docs/compass.png" alt="Constraints" width="750">
-
-</td>
-</tr>
-</table>
-
 **Constraints and alignments can target a whole group or boundary, not just
 single nodes** — the id expands to all its members, so one rule places or aligns
 an entire cluster (e.g. `core right api` puts the whole `core` group to the right
@@ -219,7 +175,7 @@ box api: "Checkout API"      // node label (omit it and the id is used)
 api --> db: "READ {rows}"    // edge label
 ```
 
-See the [Edge connectors](#edge-connectors) showcase for the arrow/line styles
+See the [Edges](#edges) showcase for the arrow/line styles
 and [Constraints](#constraints) for placement rules.
 
 ## Reuse graph with new edges

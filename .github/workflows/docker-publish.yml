@@ -42,7 +42,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_name == 'main' || github.ref_name == 'master' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
