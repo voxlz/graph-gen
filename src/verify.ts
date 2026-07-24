@@ -11,7 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { parseGraphText, stripComments } from "./parser";
+import { parseGraphText, stripComments } from "./parse";
 
 const dumpPath = process.argv[2];
 const rulesPath = process.argv[3];
@@ -73,7 +73,7 @@ if (rulesPath) {
   const raw = fs.readFileSync(rulesPath, "utf8");
   let constraints;
   if (path.extname(rulesPath).toLowerCase() === ".txt") {
-    constraints = parseGraphText(raw).constraints;
+    constraints = parseGraphText(raw).spec.constraints;
   } else {
     constraints =
       JSON.parse(stripComments(raw).replace(/,(\s*[}\]])/g, "$1"))
@@ -110,11 +110,9 @@ if (rulesPath) {
         check(aRightOfB, desc);
         break;
       case "top":
-      case "above":
         check(aAboveB, desc);
         break;
       case "bottom":
-      case "below":
         check(aBelowB, desc);
         break;
       case "topleft":

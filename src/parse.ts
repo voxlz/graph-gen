@@ -1,4 +1,4 @@
-// parser.ts
+// parse.ts
 // Parses the graph DSL (*.txt) into the intermediate JSON representation
 // consumed by index.ts. The intermediate shape mirrors parsedGraphExample.json:
 //
@@ -14,7 +14,34 @@
 // The DSL is intentionally forgiving: unknown lines are warned about and skipped
 // rather than aborting the whole parse.
 
-"use strict";
+export interface GraphSpec {
+  graph: Record<string, string | number | null>;
+  shapes: Record<string, Record<string, string | number>>;
+  nodes: any[];
+  boundaries: any[];
+  edges: any[];
+  constraints: any[];
+  imports: string[];
+  warnings: string[];
+}
+
+export interface ParseResult {
+  spec: GraphSpec;
+  errors: string[];
+}
+
+function emptyGraphSpec(): GraphSpec {
+  return {
+    graph: { title: "", minGap: null, lines: "direct" },
+    shapes: {},
+    nodes: [],
+    boundaries: [],
+    edges: [],
+    constraints: [],
+    imports: [],
+    warnings: [],
+  };
+}
 
 // --- comment stripping (string-aware) ---------------------------------------
 // Removes // line comments and /* */ block comments without touching text that
@@ -278,9 +305,6 @@ function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
       continue;
     }
     const [, source, connector, target] = m;
-    if (source === target) {
-      throw new Error(`Edge from a node to itself is not supported: "${line}"`);
-    }
     const edge = {
       source,
       target,
@@ -316,26 +340,8 @@ function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
 }
 
 // --- constraints block ------------------------------------------------------
-const DIRECTIONS = new Set([
-  "top",
-  "bottom",
-  "left",
-  "right",
-  "topleft",
-  "topright",
-  "bottomleft",
-  "bottomright",
-  "near",
-  // back-compat synonyms
-  "above",
-  "below",
-]);
-
 function normalizeDir(dir: string) {
-  const d = dir.toLowerCase();
-  if (d === "above") return "top";
-  if (d === "below") return "bottom";
-  return d;
+  return dir.toLowerCase();
 }
 
 function parseConstraintsBlock(
@@ -375,58 +381,50 @@ function parseConstraintsBlock(
       continue;
     }
     const [, a, dir, b] = m;
-    if (!DIRECTIONS.has(dir.toLowerCase())) {
-      warnings.push(`Unknown constraint direction "${dir}" in: "${line}"`);
-      continue;
-    }
     constraints.push({ type: normalizeDir(dir), a, b });
   }
 }
 
 // --- top-level parse --------------------------------------------------------
-function parseGraphText(text: string) {
+function parseGraphText(text: string): ParseResult {
   const cleaned = stripComments(text);
-  const warnings: string[] = [];
-
-  const result: any = {
-    graph: { title: "", minGap: null, lines: "direct" },
-    shapes: {},
-    nodes: [],
-    boundaries: [],
-    edges: [],
-    constraints: [],
-  };
+  const spec = emptyGraphSpec();
 
   // title "..."
   const titleMatch = cleaned.match(/(^|\n)\s*title\s+"([^"]*)"/);
-  if (titleMatch) result.graph.title = titleMatch[2];
+  if (titleMatch) spec.graph.title = titleMatch[2];
 
   // import "..." directives — pull in another graph's nodes / boundaries /
   // constraints so a file can reference them and add edges on top.
-  result.imports = [];
   const importRe = /(^|\n)\s*import\s+"([^"]*)"/g;
   let im;
-  while ((im = importRe.exec(cleaned)) !== null) result.imports.push(im[2]);
+  while ((im = importRe.exec(cleaned)) !== null) spec.imports.push(im[2]);
 
   // named blocks: name { ... }
-  const blockNames = ["graph", "shapes", "nodes", "edges", "constraints"];
-  for (const name of blockNames) {
-    const re = new RegExp(`(^|\\n)\\s*${name}\\s*\\{`);
-    const match = cleaned.match(re);
-    if (!match) continue;
-    const openIdx = cleaned.indexOf("{", match.index);
-    const { body } = extractBlock(cleaned, openIdx);
-    if (name === "graph") parseSettingsBlock(body, result.graph, warnings);
-    else if (name === "shapes") parseShapesBlock(body, result.shapes, warnings);
-    else if (name === "nodes")
-      parseNodesBlock(body, null, result.nodes, result.boundaries, warnings);
-    else if (name === "edges") parseEdgesBlock(body, result.edges, warnings);
-    else if (name === "constraints")
-      parseConstraintsBlock(body, result.constraints, warnings);
+  try {
+    const blockNames = ["graph", "shapes", "nodes", "edges", "constraints"];
+    for (const name of blockNames) {
+      const re = new RegExp(`(^|\\n)\\s*${name}\\s*\\{`);
+      const match = cleaned.match(re);
+      if (!match) continue;
+      const openIdx = cleaned.indexOf("{", match.index);
+      const { body } = extractBlock(cleaned, openIdx);
+      if (name === "graph") parseSettingsBlock(body, spec.graph, spec.warnings);
+      else if (name === "shapes")
+        parseShapesBlock(body, spec.shapes, spec.warnings);
+      else if (name === "nodes")
+        parseNodesBlock(body, null, spec.nodes, spec.boundaries, spec.warnings);
+      else if (name === "edges")
+        parseEdgesBlock(body, spec.edges, spec.warnings);
+      else if (name === "constraints")
+        parseConstraintsBlock(body, spec.constraints, spec.warnings);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { spec, errors: [message] };
   }
 
-  result.warnings = warnings;
-  return result;
+  return { spec, errors: [] };
 }
 
-export { parseGraphText, stripComments };
+export { emptyGraphSpec, parseGraphText, stripComments };

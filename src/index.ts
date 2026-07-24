@@ -2,12 +2,12 @@
 // Usage: tsx src/index.ts <input.txt|input.json> <output.png> [style.jsonc]
 //
 // Pipeline:
-//  1. Load the graph spec. A .txt input is parsed by parser.ts into the
+//  1. Load the graph spec. A .txt input is parsed by parse.ts into the
 //     intermediate JSON representation; a .json input is treated as that
 //     intermediate representation directly.
 //  2. Merge styling: style.json provides the global defaults, the graph's own
 //     `shapes` block overrides them per shape.
-//  3. Translate "A right of B" / "A below B" style rules into WebCola
+//  3. Translate directional graph rules into WebCola
 //     separation constraints, and boundaries into WebCola groups.
 //  4. Run WebCola (headless, no DOM) to solve positions with overlap avoidance.
 //  5. Render the result with node-canvas -> PNG.
@@ -16,7 +16,14 @@ import fs from "node:fs";
 import path from "node:path";
 import * as cola from "webcola";
 import { createCanvas } from "canvas";
-import { parseGraphText, stripComments } from "./parser";
+import {
+  emptyGraphSpec,
+  parseGraphText,
+  stripComments,
+  type GraphSpec,
+  type ParseResult,
+} from "./parse";
+import { validateGraph } from "./validate";
 
 const inputPath = process.argv[2] || "graph.txt";
 const outputPath = process.argv[3] || "output.png";
@@ -31,22 +38,43 @@ function parseJsonc(text: string): any {
 }
 
 // --- load spec (parse DSL or read intermediate JSON), resolving imports -----
-function parseFile(file: string): any {
-  const raw = fs.readFileSync(file, "utf8");
-  return path.extname(file).toLowerCase() === ".txt"
-    ? parseGraphText(raw)
-    : parseJsonc(raw);
+function parseFile(file: string): ParseResult {
+  try {
+    const raw = fs.readFileSync(file, "utf8");
+    if (path.extname(file).toLowerCase() === ".txt") {
+      return parseGraphText(raw);
+    }
+    const data = parseJsonc(raw);
+    return {
+      spec: {
+        ...emptyGraphSpec(),
+        ...data,
+        graph: { ...emptyGraphSpec().graph, ...(data.graph || {}) },
+        shapes: data.shapes || {},
+        nodes: data.nodes || [],
+        boundaries: data.boundaries || [],
+        edges: data.edges || [],
+        constraints: data.constraints || [],
+        imports: data.imports || [],
+        warnings: data.warnings || [],
+      },
+      errors: [],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { spec: emptyGraphSpec(), errors: [`${file}: ${message}`] };
+  }
 }
 
 // Merge `src` into `target`. Imported graphs contribute nodes / boundaries /
 // constraints / shapes / graph settings; edges are only taken when includeEdges
 // is true (so an importer keeps its own edges, not the base graph's).
-function mergeSpec(target: any, src: any, includeEdges: boolean) {
+function mergeSpec(target: GraphSpec, src: GraphSpec, includeEdges: boolean) {
   Object.assign(target.graph, src.graph || {});
   for (const [name, style] of Object.entries(src.shapes || {})) {
     target.shapes[name] = {
       ...(target.shapes[name] || {}),
-      ...(style as Record<string, unknown>),
+      ...(style as Record<string, string | number>),
     };
   }
   const nodeIds = new Set(target.nodes.map((n: any) => n.id));
@@ -68,21 +96,15 @@ function mergeSpec(target: any, src: any, includeEdges: boolean) {
   target.warnings.push(...(src.warnings || []));
 }
 
-function loadSpec(file: string, seen = new Set<string>()): any {
+function loadSpec(file: string, seen = new Set<string>()): ParseResult {
   const abs = path.resolve(file);
-  const spec = parseFile(abs);
-  if (!spec.imports || spec.imports.length === 0) return spec;
+  const parsed = parseFile(abs);
+  if (parsed.errors.length > 0) return parsed;
+  const spec = parsed.spec;
+  if (spec.imports.length === 0) return parsed;
 
   seen.add(abs);
-  const merged: any = {
-    graph: {},
-    shapes: {},
-    nodes: [],
-    boundaries: [],
-    edges: [],
-    constraints: [],
-    warnings: [],
-  };
+  const merged = emptyGraphSpec();
   const dir = path.dirname(abs);
   for (const imp of spec.imports) {
     const impAbs = path.resolve(dir, imp);
@@ -90,15 +112,25 @@ function loadSpec(file: string, seen = new Set<string>()): any {
       merged.warnings.push(`circular import skipped: ${imp}`);
       continue;
     }
-    mergeSpec(merged, loadSpec(impAbs, seen), false); // base: no edges
+    const imported = loadSpec(impAbs, seen);
+    if (imported.errors.length > 0) return imported;
+    mergeSpec(merged, imported.spec, false); // base: no edges
   }
   mergeSpec(merged, spec, true); // this file's own edges (and extras) on top
-  return merged;
+  return { spec: merged, errors: [] };
 }
 
-const spec = loadSpec(inputPath);
-if (spec.warnings && spec.warnings.length) {
+const loaded = loadSpec(inputPath);
+if (loaded.errors.length > 0) {
+  for (const error of loaded.errors) console.error(`[parse] ${error}`);
+  process.exit(1);
+}
+const spec = loaded.spec;
+if (spec.warnings.length) {
   for (const w of spec.warnings) console.warn(`[parse] ${w}`);
+}
+for (const error of validateGraph(spec).errors) {
+  console.error(`[validate] ${error}`);
 }
 
 // --- load + merge styles ----------------------------------------------------
@@ -147,7 +179,7 @@ function styleFor(shape: string): any {
 }
 
 const graphMeta = {
-  title: spec.graph?.title ?? "",
+  title: String(spec.graph.title ?? ""),
   minGap: spec.graph?.minGap ?? globalStyle.graph?.minGap ?? 50,
   // clear space kept between adjacent nodes (and between a node and any
   // boundary it is not a member of). Enforced by inflating node extents while
@@ -265,10 +297,8 @@ const nearPairs: any[] = [];
 for (const e of spec.edges || []) {
   const s = idToIndex[e.source];
   const t = idToIndex[e.target];
-  if (s == null || t == null) {
-    console.warn(
-      `[edge] skipping edge with unknown endpoint: ${e.source} -> ${e.target}`,
-    );
+  if (s == null || t == null || s === t) {
+    console.warn(`[edge] skipping invalid edge: ${e.source} -> ${e.target}`);
     continue;
   }
   links.push({
@@ -351,11 +381,9 @@ for (const rule of spec.constraints || []) {
       sep("x", B, A, colaConstraints);
       break;
     case "top":
-    case "above":
       sep("y", A, B, colaConstraints);
       break;
     case "bottom":
-    case "below":
       sep("y", B, A, colaConstraints);
       break;
     case "topleft":
@@ -417,63 +445,6 @@ for (const rule of spec.constraints || []) {
 
 // "near" is modelled as an extra short attractive link
 const layoutLinks = links.concat(nearPairs);
-
-// --- validate constraints for impossible (contradictory) orderings ----------
-// Each separation constraint says "left must come before right" on its axis.
-// A cycle in these per-axis "before" relations is unsatisfiable, e.g.
-//   a right b, b right c, c right a           (direct cycle), or
-//   boundary a { b c }; d right a; d left c   (d after c AND before c).
-// Group/boundary rules are already expanded to node-level separations here, so
-// a plain cycle search over colaConstraints catches both forms.
-function findOrderingCycle(axis: string): number[] | null {
-  const adj = new Map(); // left -> set of rights (left must precede right)
-  for (const c of colaConstraints) {
-    if (c.axis !== axis) continue;
-    // only separation constraints impose an ordering; alignment (equality)
-    // constraints have no left/right and must be ignored here.
-    if (c.type && c.type !== "separation") continue;
-    if (!adj.has(c.left)) adj.set(c.left, new Set());
-    adj.get(c.left).add(c.right);
-  }
-  const state = new Map(); // 0=unvisited, 1=in-stack, 2=done
-  const parent = new Map();
-  let cycle: number[] | null = null;
-  const visit = (u: number): boolean => {
-    state.set(u, 1);
-    for (const v of adj.get(u) || []) {
-      if (state.get(v) === 1) {
-        cycle = [u];
-        let x = u;
-        while (x !== v) {
-          x = parent.get(x);
-          cycle.push(x);
-        }
-        cycle.reverse();
-        return true;
-      }
-      if (!state.get(v)) {
-        parent.set(v, u);
-        if (visit(v)) return true;
-      }
-    }
-    state.set(u, 2);
-    return false;
-  };
-  for (const u of adj.keys()) {
-    if (!state.get(u) && visit(u)) break;
-  }
-  return cycle; // array of node indices forming the cycle, or null
-}
-for (const axis of ["x", "y"]) {
-  const cyc = findOrderingCycle(axis);
-  if (cyc) {
-    const chain = cyc.map((i) => nodes[i].id).join(" -> ");
-    const dir = axis === "x" ? "left/right" : "top/bottom";
-    console.warn(
-      `[constraint] impossible ${dir} ordering (cycle): ${chain} -> ${nodes[cyc[0]].id}`,
-    );
-  }
-}
 
 // --- run the solver ---------------------------------------------------------
 const layout = new cola.Layout()
