@@ -1,5 +1,9 @@
 title "Weather API - Scope"
 
+graph {
+    labelFormat "{index}. {label}"
+}
+
 nodes {
     box client: "API Client"
     actor attacker: "External Attacker"

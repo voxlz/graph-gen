@@ -32,7 +32,7 @@ export interface ParseResult {
 
 function emptyGraphSpec(): GraphSpec {
   return {
-    graph: { title: "", minGap: null, lines: "direct" },
+    graph: {},
     shapes: {},
     nodes: [],
     boundaries: [],
@@ -301,11 +301,6 @@ function parseEdgesBlock(
   warnings: string[],
   startLine: number,
 ) {
-  // Track edges by unordered node pair so a second edge between the same two
-  // nodes is merged into the first (rather than silently overriding it):
-  // arrows are combined (bidirectional if opposite) and labels are joined with
-  // a newline into a multi-line label.
-  const byPair = new Map();
   for (const [index, raw] of body.split("\n").entries()) {
     const line = raw.trim();
     if (!line) continue;
@@ -325,35 +320,19 @@ function parseEdgesBlock(
       continue;
     }
     const [, source, connector, target] = m;
-    const edge = {
+    const arrowSource = connector.startsWith("<");
+    const arrowTarget = connector.endsWith(">");
+    const lineStyle = connector.includes(".") ? "dotted" : "solid";
+    const sourceLine = startLine + index;
+    edges.push({
       source,
       target,
       label,
-      arrowSource: connector.startsWith("<"),
-      arrowTarget: connector.endsWith(">"),
-      lineStyle: connector.includes(".") ? "dotted" : "solid",
-      line: startLine + index,
-    };
-
-    const key = [source, target].slice().sort().join("\u0000");
-    const existing = byPair.get(key);
-    if (existing) {
-      // map the new edge's arrows onto the existing edge's orientation
-      const reversed =
-        edge.source === existing.target && edge.target === existing.source;
-      const atSource = reversed ? edge.arrowTarget : edge.arrowSource;
-      const atTarget = reversed ? edge.arrowSource : edge.arrowTarget;
-      existing.arrowSource = existing.arrowSource || atSource;
-      existing.arrowTarget = existing.arrowTarget || atTarget;
-      if (edge.label) {
-        existing.label = existing.label
-          ? `${existing.label}\n${edge.label}`
-          : edge.label;
-      }
-    } else {
-      edges.push(edge);
-      byPair.set(key, edge);
-    }
+      arrowSource,
+      arrowTarget,
+      lineStyle,
+      line: sourceLine,
+    });
   }
 }
 

@@ -1,5 +1,9 @@
 title "Bookstore - Scope"
 
+graph {
+    labelFormat "{index}. {label}"
+}
+
 nodes {
     box customer: "Customer"
     actor attacker: "External Attacker"

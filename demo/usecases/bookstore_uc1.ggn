@@ -7,16 +7,16 @@ graph {
 }
 
 edges {
-    customer --> gateway: "1. GET /books {query}"
-    gateway --> catalog: "2. search {query}"
-    catalog --> cache: "3. READ {cached results}"
-    catalog --> postgres: "4. READ {book records}"
-    catalog --> gateway: "5. Return {books}"
-    gateway --> customer: "6. Return {book list}"
-    customer --> gateway: "7. POST /orders {cart, cookie:auth}"
-    gateway --> orders: "8. create order {cart}"
-    orders --> postgres: "9. WRITE {order}"
-    orders --> payments: "10. charge {amount, token}"
-    orders --> email: "11. SEND {order confirmation}"
-    orders --> customer: "12. Return {order id}"
+    customer --> gateway: "GET /books {query}"
+    gateway --> catalog: "search {query}"
+    catalog --> cache: "READ {cached results}"
+    catalog --> postgres: "READ {book records}"
+    catalog --> gateway: "Return {books}"
+    gateway --> customer: "Return {book list}"
+    customer --> gateway: "POST /orders {cart, cookie:auth}"
+    gateway --> orders: "create order {cart}"
+    orders --> postgres: "WRITE {order}"
+    orders --> payments: "charge {amount, token}"
+    orders --> email: "SEND {order confirmation}"
+    orders --> customer: "Return {order id}"
 }

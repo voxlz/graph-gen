@@ -9,6 +9,60 @@ export interface RenderResult {
   height: number;
 }
 
+export function formatEdgeLabel(
+  template: string,
+  edge: Record<string, unknown>,
+  index: number,
+): string {
+  if (!template) return String(edge.label ?? "");
+
+  return template.replace(/\{(\w+)\}/g, (placeholder, key) => {
+    if (key === "index") return String(index + 1);
+    const value = edge[key];
+    return value == null ? placeholder : String(value);
+  });
+}
+
+export function prepareEdges(edges: any[], labelFormat: string): any[] {
+  const prepared: any[] = [];
+  const byPair = new Map<string, any>();
+  for (const [index, rawEdge] of edges.entries()) {
+    const arrowSource = rawEdge.arrowSource ?? rawEdge.type === "leftArrow";
+    const arrowTarget = rawEdge.arrowTarget ?? rawEdge.type === "rightArrow";
+    const lineStyle = rawEdge.lineStyle || "solid";
+    const edge = {
+      ...rawEdge,
+      label: rawEdge.label
+        ? formatEdgeLabel(
+            labelFormat,
+            { ...rawEdge, arrowSource, arrowTarget, lineStyle },
+            index,
+          )
+        : "",
+      arrowSource,
+      arrowTarget,
+      lineStyle,
+    };
+    const key = [edge.source, edge.target].sort().join("\u0000");
+    const existing = byPair.get(key);
+    if (!existing) {
+      prepared.push(edge);
+      byPair.set(key, edge);
+      continue;
+    }
+    const reversed =
+      edge.source === existing.target && edge.target === existing.source;
+    existing.arrowSource ||= reversed ? edge.arrowTarget : edge.arrowSource;
+    existing.arrowTarget ||= reversed ? edge.arrowSource : edge.arrowTarget;
+    if (edge.label) {
+      existing.label = existing.label
+        ? `${existing.label}\n${edge.label}`
+        : edge.label;
+    }
+  }
+  return prepared;
+}
+
 function parseJsonc(text: string): any {
   const noComments = stripComments(text);
   const noTrailingCommas = noComments.replace(/,(\s*[}\]])/g, "$1");
@@ -121,6 +175,8 @@ export async function renderGraph(
     // default colour for edges and arrowheads.
     lineColor:
       spec.graph?.lineColor ?? globalStyle.graph?.lineColor ?? "#000000",
+    labelFormat:
+      spec.graph?.labelFormat ?? globalStyle.graph?.labelFormat ?? "",
     // clear gap between a boundary's nodes and its border.
     boundaryPad:
       spec.graph?.boundaryPad ?? globalStyle.graph?.boundaryPad ?? 34,
@@ -229,7 +285,10 @@ export async function renderGraph(
   // --- build links ------------------------------------------------------------
   const links: any[] = [];
   const nearPairs: any[] = [];
-  for (const e of spec.edges || []) {
+  for (const e of prepareEdges(
+    spec.edges || [],
+    String(graphMeta.labelFormat),
+  )) {
     const s = idToIndex[e.source];
     const t = idToIndex[e.target];
     if (s == null || t == null || s === t) {
@@ -239,11 +298,11 @@ export async function renderGraph(
     links.push({
       source: s,
       target: t,
-      label: e.label || "",
+      label: e.label,
       // support DSL booleans and the legacy `type` field ("rightArrow"/"leftArrow"/"line")
-      arrowSource: e.arrowSource ?? e.type === "leftArrow",
-      arrowTarget: e.arrowTarget ?? e.type === "rightArrow",
-      lineStyle: e.lineStyle || "solid",
+      arrowSource: e.arrowSource,
+      arrowTarget: e.arrowTarget,
+      lineStyle: e.lineStyle,
     });
   }
 

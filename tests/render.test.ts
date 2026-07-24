@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { emptyGraphSpec } from "../src/parse";
-import { renderErrorGraph, renderGraph } from "../src/render";
+import {
+  formatEdgeLabel,
+  prepareEdges,
+  renderErrorGraph,
+  renderGraph,
+} from "../src/render";
 
 describe("renderGraph", () => {
   it("writes a PNG for an empty graph", async () => {
@@ -20,6 +25,57 @@ describe("renderGraph", () => {
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("formats graph edge labels with their index and parsed edge data", () => {
+    const edge = {
+      source: "customer",
+      target: "api",
+      label: "GET /orders",
+      arrowSource: false,
+      arrowTarget: true,
+      lineStyle: "solid",
+      line: 12,
+    };
+
+    expect(
+      formatEdgeLabel(
+        "{index}. {source} -> {target}: {label} ({lineStyle}, line {line})",
+        edge,
+        1,
+      ),
+    ).toBe("2. customer -> api: GET /orders (solid, line 12)");
+    expect(formatEdgeLabel("", edge, 1)).toBe("GET /orders");
+  });
+
+  it("formats duplicate edge labels before merging them", () => {
+    expect(
+      prepareEdges(
+        [
+          {
+            source: "customer",
+            target: "gateway",
+            label: "Request",
+            arrowTarget: true,
+          },
+          {
+            source: "gateway",
+            target: "customer",
+            label: "Response",
+            arrowTarget: true,
+          },
+        ],
+        "{index}. {label}",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        source: "customer",
+        target: "gateway",
+        arrowSource: true,
+        arrowTarget: true,
+        label: "1. Request\n2. Response",
+      }),
+    ]);
   });
 
   it("writes an error PNG with the supplied diagnostics", async () => {

@@ -209,6 +209,13 @@ styles; only the file being rendered contributes edges.
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
 
-A graph's own `shapes { ... }` block overrides these for that graph only, and a
-custom style file can be passed per render (the optional third CLI argument).
+Within a graph's `graph { ... }` block, `labelFormat` is an optional template
+applied to each labelled edge before duplicate edges are merged. It receives
+`{index}` (one-based) plus every parsed edge property, such as `{source}`,
+`{target}`, `{label}`, `{arrowSource}`, `{arrowTarget}`, `{lineStyle}`, and
+`{line}`. An empty value leaves labels unchanged.
+
+A graph's own `shapes { ... }` block overrides global shape defaults for that
+graph only, and a custom style file can be passed per render (the optional third
+CLI argument).
 Both `style.jsonc` and JSON inputs may contain `//` comments and trailing commas.

@@ -28,7 +28,7 @@ edges {
     expect(result.spec.edges[0].line).toBe(5);
   });
 
-  it("silently merges duplicate edges", () => {
+  it("preserves duplicate edges for render-time merging", () => {
     const result = parseGraphText(`edges {
 customer --> gateway: "Request"
 gateway --> customer: "Response"
@@ -40,9 +40,16 @@ gateway --> customer: "Response"
       expect.objectContaining({
         source: "customer",
         target: "gateway",
-        arrowSource: true,
+        arrowSource: false,
         arrowTarget: true,
-        label: "Request\nResponse",
+        label: "Request",
+      }),
+      expect.objectContaining({
+        source: "gateway",
+        target: "customer",
+        arrowSource: false,
+        arrowTarget: true,
+        label: "Response",
       }),
     ]);
   });
