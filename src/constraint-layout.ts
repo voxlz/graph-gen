@@ -51,6 +51,7 @@ export interface ConstraintLayoutOptions {
   iterations: number;
   stableIterations?: number;
   debugFrameEvery?: number;
+  minimizeIterations?: number;
 }
 
 export interface LayoutSnapshot {
@@ -1211,6 +1212,64 @@ function captureSnapshot(
   };
 }
 
+function layoutCenter(ctx: LayoutContext): { x: number; y: number } {
+  const bounds = ctx.nodes.reduce<LayoutRect>(
+    (result, node) => {
+      const rect = nodeRect(node);
+      result.minX = Math.min(result.minX, rect.minX);
+      result.maxX = Math.max(result.maxX, rect.maxX);
+      result.minY = Math.min(result.minY, rect.minY);
+      result.maxY = Math.max(result.maxY, rect.maxY);
+      return result;
+    },
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
+  return Number.isFinite(bounds.minX) ? rectCenter(bounds) : { x: 0, y: 0 };
+}
+
+function tryMinimizeAxis(
+  ctx: LayoutContext,
+  node: LayoutNode,
+  axis: "x" | "y",
+  center: number,
+): boolean {
+  const original = node[axis];
+  const delta = center - original;
+  if (Math.abs(delta) <= EPSILON) return false;
+  for (const fraction of [
+    1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,
+    0.001953125,
+  ]) {
+    node[axis] = original + delta * fraction;
+    if (
+      collectViolations(ctx, false).messages.length === 0 &&
+      collectViolations(ctx).messages.length === 0
+    ) {
+      return true;
+    }
+    node[axis] = original;
+  }
+  return false;
+}
+
+function minimizeLayout(ctx: LayoutContext, generations: number): void {
+  for (let generation = 0; generation < generations; generation++) {
+    let moved = false;
+    for (const axis of ["x", "y"] as const) {
+      const center = layoutCenter(ctx)[axis];
+      const orderedNodes = [...ctx.nodes].sort(
+        (a, b) =>
+          Math.abs(b[axis] - center) - Math.abs(a[axis] - center) ||
+          a.id.localeCompare(b.id),
+      );
+      for (const node of orderedNodes) {
+        moved = tryMinimizeAxis(ctx, node, axis, center) || moved;
+      }
+    }
+    if (!moved) break;
+  }
+}
+
 export function solveConstraintLayout(
   nodes: LayoutNode[],
   boundaries: LayoutBoundary[],
@@ -1254,15 +1313,26 @@ export function solveConstraintLayout(
     if (stable >= stableTarget) break;
   }
   const completedIterations = Math.min(iteration, options.iterations);
-  if (every > 0 && snapshots.at(-1)?.iteration !== completedIterations) {
-    snapshots.push(
-      captureSnapshot(
-        ctx,
-        completedIterations,
-        check.messages.length,
-        check.placements,
-      ),
+  if (check.messages.length === 0) {
+    const minimizeIterations = Math.max(
+      0,
+      Math.floor(options.minimizeIterations ?? 100),
     );
+    minimizeLayout(ctx, minimizeIterations);
+    check = collectViolations(ctx);
+  }
+  if (every > 0) {
+    const finalSnapshot = captureSnapshot(
+      ctx,
+      completedIterations,
+      check.messages.length,
+      check.placements,
+    );
+    if (snapshots.at(-1)?.iteration === completedIterations) {
+      snapshots[snapshots.length - 1] = finalSnapshot;
+    } else {
+      snapshots.push(finalSnapshot);
+    }
   }
   return {
     valid: check.messages.length === 0,

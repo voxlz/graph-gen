@@ -11,6 +11,7 @@
     "iterations": [0, 100, 1000], // WebCola solver passes [unconstrained, userConstraint, allConstraint]
     "layout": "constraint", // "constraint" (default) or legacy "cola"
     "layoutIterations": 1000, // hard limit for the constraint solver
+    "minimize": 100, // post-layout generations that compact valid layouts toward the center
     "debugFrameEvery": 0, // set to 5 to write a PNG every five solver iterations
     "lines": "direct", // "direct" or "curved" or "angled". lets only support direct for now.
   },

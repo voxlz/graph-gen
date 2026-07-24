@@ -337,6 +337,12 @@ export async function renderGraph(
         globalStyle.graph?.debugFrameEvery ??
         0,
     ),
+    minimize: Number(
+      process.env.GRAPHGEN_MINIMIZE ??
+        spec.graph?.minimize ??
+        globalStyle.graph?.minimize ??
+        100,
+    ),
   };
 
   // --- text measuring (for sizing nodes to their labels) ----------------------
@@ -659,6 +665,9 @@ export async function renderGraph(
         debugFrameEvery: Number.isFinite(graphMeta.debugFrameEvery)
           ? Math.max(0, Math.floor(graphMeta.debugFrameEvery))
           : 0,
+        minimizeIterations: Number.isFinite(graphMeta.minimize)
+          ? Math.max(0, Math.floor(graphMeta.minimize))
+          : 100,
       },
     );
     constraintGroupRects = result.groups;

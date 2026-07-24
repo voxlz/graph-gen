@@ -97,6 +97,32 @@ function properSegmentsCross(
 }
 
 describe("solveConstraintLayout", () => {
+  it("minimizes disconnected nodes to their exact clearance", () => {
+    const baselineNodes = [node("wide", 400, 60), node("small", 40, 60)];
+    solveConstraintLayout(baselineNodes, [], [], [], {
+      ...options,
+      minimizeIterations: 0,
+    });
+    const baselineDistance = Math.abs(baselineNodes[0].x - baselineNodes[1].x);
+
+    const minimizedNodes = [node("wide", 400, 60), node("small", 40, 60)];
+    const result = solveConstraintLayout(minimizedNodes, [], [], [], {
+      ...options,
+      minimizeIterations: 100,
+    });
+    const minimizedDistance = Math.abs(
+      minimizedNodes[0].x - minimizedNodes[1].x,
+    );
+    const exactClearance =
+      minimizedNodes[0].width / 2 +
+      minimizedNodes[1].width / 2 +
+      options.nodeGap;
+
+    expect(result.violations).toEqual([]);
+    expect(minimizedDistance).toBeLessThan(baselineDistance);
+    expect(minimizedDistance).toBeCloseTo(exactClearance, 1);
+  });
+
   it("orders differently sized rectangular nodes without overlap", () => {
     const nodes = [node("wide", 180, 40), node("tall", 50, 160)];
 
