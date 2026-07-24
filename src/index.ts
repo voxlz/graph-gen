@@ -17,8 +17,8 @@ import {
   type GraphSpec,
   type ParseResult,
 } from "./parse";
-import { renderGraph } from "./render";
-import { validateGraph } from "./validate";
+import { renderErrorGraph, renderGraph } from "./render";
+import { validateGraph, type DiagnosticLocation } from "./validate";
 
 const inputPath = process.argv[2] || "graph.ggn";
 const outputPath = process.argv[3] || "output.png";
@@ -32,6 +32,24 @@ function parseJsonc(text: string): any {
   return JSON.parse(noTrailingCommas);
 }
 
+function setSourceFile(spec: GraphSpec, file: string) {
+  for (const item of [
+    ...spec.nodes,
+    ...spec.boundaries,
+    ...spec.edges,
+    ...spec.constraints,
+  ]) {
+    item.sourceFile = file;
+  }
+}
+
+function locateParseError(file: string, error: string) {
+  const match = error.match(/ at line (\d+)$/);
+  const line = match ? Number(match[1]) : 1;
+  const message = match ? error.slice(0, match.index) : error;
+  return `${file}:${line}: ${message}`;
+}
+
 // --- load spec (parse DSL or read intermediate JSON), resolving imports -----
 function parseFile(file: string): ParseResult {
   try {
@@ -41,10 +59,17 @@ function parseFile(file: string): ParseResult {
       if (formatted.errors.length > 0) {
         return {
           spec: emptyGraphSpec(),
-          errors: formatted.errors.map((error) => `${file}: ${error}`),
+          errors: formatted.errors.map((error) =>
+            locateParseError(file, error),
+          ),
         };
       }
-      return parseGraphText(formatted.formatted);
+      const parsed = parseGraphText(formatted.formatted);
+      setSourceFile(parsed.spec, file);
+      return {
+        ...parsed,
+        errors: parsed.errors.map((error) => locateParseError(file, error)),
+      };
     }
     if (extension !== ".json") {
       return {
@@ -71,7 +96,7 @@ function parseFile(file: string): ParseResult {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { spec: emptyGraphSpec(), errors: [`${file}: ${message}`] };
+    return { spec: emptyGraphSpec(), errors: [`${file}:1: ${message}`] };
   }
 }
 
@@ -129,25 +154,72 @@ function loadSpec(file: string, seen = new Set<string>()): ParseResult {
   return { spec: merged, errors: [] };
 }
 
-const loaded = loadSpec(inputPath);
-if (loaded.errors.length > 0) {
-  for (const error of loaded.errors) console.error(`[parse] ${error}`);
-  process.exit(1);
-}
-const spec = loaded.spec;
-if (spec.warnings.length) {
-  for (const w of spec.warnings) console.warn(`[parse] ${w}`);
-}
-for (const error of validateGraph(spec).errors) {
-  console.error(`[validate] ${error}`);
+function writeResult(result: Promise<{ width: number; height: number }>) {
+  result
+    .then(({ width, height }) => {
+      console.log(`Wrote ${outputPath} (${width}x${height})`);
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to render ${outputPath}: ${message}`);
+      process.exitCode = 1;
+    });
 }
 
-renderGraph(spec, outputPath, stylePath)
-  .then(({ width, height }) => {
-    console.log(`Wrote ${outputPath} (${width}x${height})`);
-  })
-  .catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to render ${outputPath}: ${message}`);
-    process.exitCode = 1;
+function formatDiagnostic(
+  category: string,
+  message: string,
+  location: DiagnosticLocation = {},
+) {
+  const file = location.file ?? inputPath;
+  const line = location.line ?? 1;
+  const header = `[${category}] ${file}:${line}`;
+  const diagnostic = `${header}\nERROR: ${message}`;
+  try {
+    const sourceLines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+    const first = Math.max(1, line - 2);
+    const last = Math.min(sourceLines.length, line + 2);
+    const context = sourceLines
+      .slice(first - 1, last)
+      .map((source, index) => {
+        const sourceLine = first + index;
+        const marker = sourceLine === line ? ">" : " ";
+        return `${marker} ${String(sourceLine).padStart(4)} | ${source}`;
+      })
+      .join("\n");
+    return context ? `${diagnostic}\nContext:\n${context}` : diagnostic;
+  } catch {
+    return diagnostic;
+  }
+}
+
+function formatParseDiagnostic(error: string) {
+  const match = error.match(/^(.*):(\d+):\s*(.*)$/);
+  if (!match) return `[parse]\nERROR: ${error}`;
+  return formatDiagnostic("parse", match[3], {
+    file: match[1],
+    line: Number(match[2]),
   });
+}
+
+const loaded = loadSpec(inputPath);
+if (loaded.errors.length > 0) {
+  const errors = loaded.errors.map(formatParseDiagnostic);
+  for (const error of errors) console.error(error);
+  writeResult(renderErrorGraph(errors, outputPath));
+} else {
+  const spec = loaded.spec;
+  if (spec.warnings.length) {
+    for (const warning of spec.warnings) console.warn(`[parse] ${warning}`);
+  }
+  const validation = validateGraph(spec);
+  const errors = validation.errors.map((error, index) =>
+    formatDiagnostic("validate", error, validation.locations[index]),
+  );
+  for (const error of errors) console.error(error);
+  writeResult(
+    errors.length > 0
+      ? renderErrorGraph(errors, outputPath)
+      : renderGraph(spec, outputPath, stylePath),
+  );
+}

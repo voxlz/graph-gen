@@ -25,6 +25,19 @@ describe("validateGraph", () => {
     expect(spec.edges).toHaveLength(1);
   });
 
+  it("includes the source line for entity validation errors", () => {
+    const { spec } = parseGraphText(`nodes {
+    box customer
+}
+edges {
+    customer --> missing
+}`);
+
+    const result = validateGraph(spec);
+
+    expect(result.locations[0].line).toBe(5);
+  });
+
   it("returns errors for impossible ordering cycles", () => {
     const { spec, errors } = parseGraphText(`
       nodes {

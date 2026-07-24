@@ -15,6 +15,50 @@ function parseJsonc(text: string): any {
   return JSON.parse(noTrailingCommas);
 }
 
+async function writePng(
+  canvas: ReturnType<typeof createCanvas>,
+  outputPath: string,
+) {
+  await new Promise<void>((resolve, reject) => {
+    const out = fs.createWriteStream(outputPath);
+    const stream = canvas.createPNGStream();
+    stream.on("error", reject);
+    out.on("error", reject);
+    out.on("finish", resolve);
+    stream.pipe(out);
+  });
+}
+
+function errorGraphLines(errors: string[]): string[] {
+  return errors.flatMap((error) => error.split(/\r?\n/));
+}
+
+export async function renderErrorGraph(
+  errors: string[],
+  outputPath: string,
+): Promise<RenderResult> {
+  const width = 1000;
+  const padding = 40;
+  const lineHeight = 24;
+  const lines = errorGraphLines(errors);
+
+  const height = Math.max(160, padding * 2 + 52 + lines.length * lineHeight);
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#b42318";
+  ctx.font = "bold 24px sans-serif";
+  ctx.fillText("Graph generation failed", padding, padding);
+  ctx.font = "16px sans-serif";
+  lines.forEach((line, index) => {
+    ctx.fillText(line, padding, padding + 52 + index * lineHeight);
+  });
+
+  await writePng(canvas, outputPath);
+  return { width: canvas.width, height: canvas.height };
+}
+
 export async function renderGraph(
   spec: GraphSpec,
   outputPath: string,
@@ -863,14 +907,7 @@ export async function renderGraph(
   }
 
   // --- save -------------------------------------------------------------------
-  await new Promise<void>((resolve, reject) => {
-    const out = fs.createWriteStream(outputPath);
-    const stream = canvas.createPNGStream();
-    stream.on("error", reject);
-    out.on("error", reject);
-    out.on("finish", resolve);
-    stream.pipe(out);
-  });
+  await writePng(canvas, outputPath);
 
   return { width: canvas.width, height: canvas.height };
 }

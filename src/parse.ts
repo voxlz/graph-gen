@@ -114,7 +114,12 @@ function extractBlock(text: string, openIdx: number) {
       }
     }
   }
-  throw new Error("Unbalanced braces in DSL block");
+  const line = text.slice(0, openIdx).split("\n").length;
+  throw new Error(`Unbalanced braces in DSL block at line ${line}`);
+}
+
+function lineNumber(text: string, index: number, startLine: number) {
+  return startLine + text.slice(0, index).split("\n").length - 1;
 }
 
 // --- id slugification for label-only declarations ---------------------------
@@ -152,6 +157,7 @@ function parseNodesBlock(
   nodes: any[],
   boundaries: any[],
   warnings: string[],
+  startLine: number,
 ) {
   let i = 0;
   while (i < body.length) {
@@ -189,6 +195,7 @@ function parseNodesBlock(
       spaceIdx === -1 ? rawHeader : rawHeader.slice(0, spaceIdx)
     ).trim();
     const rest = spaceIdx === -1 ? "" : rawHeader.slice(spaceIdx).trim();
+    const line = lineNumber(body, i, startLine);
 
     if (braceIdx !== -1) {
       // boundary / group with children. `group` behaves like a boundary for
@@ -203,16 +210,24 @@ function parseNodesBlock(
         shape,
         parent,
         draw: shape !== "group",
+        line,
       });
       const { body: inner, end } = extractBlock(body, braceIdx);
-      parseNodesBlock(inner, parsed.id, nodes, boundaries, warnings);
+      parseNodesBlock(
+        inner,
+        parsed.id,
+        nodes,
+        boundaries,
+        warnings,
+        lineNumber(body, braceIdx, startLine),
+      );
       i = end;
     } else {
       const parsed = parseHeader(rest);
       if (!parsed) {
         warnings.push(`Could not parse node declaration: "${rawHeader}"`);
       } else {
-        nodes.push({ id: parsed.id, label: parsed.label, shape, parent });
+        nodes.push({ id: parsed.id, label: parsed.label, shape, parent, line });
       }
       i = j + 1;
     }
@@ -280,13 +295,18 @@ function parseSettingsBlock(
 }
 
 // --- edges block ------------------------------------------------------------
-function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
+function parseEdgesBlock(
+  body: string,
+  edges: any[],
+  warnings: string[],
+  startLine: number,
+) {
   // Track edges by unordered node pair so a second edge between the same two
   // nodes is merged into the first (rather than silently overriding it):
   // arrows are combined (bidirectional if opposite) and labels are joined with
   // a newline into a multi-line label.
   const byPair = new Map();
-  for (const raw of body.split("\n")) {
+  for (const [index, raw] of body.split("\n").entries()) {
     const line = raw.trim();
     if (!line) continue;
 
@@ -312,6 +332,7 @@ function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
       arrowSource: connector.startsWith("<"),
       arrowTarget: connector.endsWith(">"),
       lineStyle: connector.includes(".") ? "dotted" : "solid",
+      line: startLine + index,
     };
 
     const key = [source, target].slice().sort().join("\u0000");
@@ -345,8 +366,9 @@ function parseConstraintsBlock(
   body: string,
   constraints: any[],
   warnings: string[],
+  startLine: number,
 ) {
-  for (const raw of body.split("\n")) {
+  for (const [index, raw] of body.split("\n").entries()) {
     const line = raw.trim();
     if (!line) continue;
 
@@ -368,7 +390,7 @@ function parseConstraintsBlock(
         warnings.push(`align needs at least two ids in: "${line}"`);
         continue;
       }
-      constraints.push({ type: "align", axis, ids });
+      constraints.push({ type: "align", axis, ids, line: startLine + index });
       continue;
     }
 
@@ -378,7 +400,12 @@ function parseConstraintsBlock(
       continue;
     }
     const [, a, dir, b] = m;
-    constraints.push({ type: normalizeDir(dir), a, b });
+    constraints.push({
+      type: normalizeDir(dir),
+      a,
+      b,
+      line: startLine + index,
+    });
   }
 }
 
@@ -406,15 +433,23 @@ function parseGraphText(text: string): ParseResult {
       if (!match) continue;
       const openIdx = cleaned.indexOf("{", match.index);
       const { body } = extractBlock(cleaned, openIdx);
+      const startLine = lineNumber(cleaned, openIdx, 1);
       if (name === "graph") parseSettingsBlock(body, spec.graph, spec.warnings);
       else if (name === "shapes")
         parseShapesBlock(body, spec.shapes, spec.warnings);
       else if (name === "nodes")
-        parseNodesBlock(body, null, spec.nodes, spec.boundaries, spec.warnings);
+        parseNodesBlock(
+          body,
+          null,
+          spec.nodes,
+          spec.boundaries,
+          spec.warnings,
+          startLine,
+        );
       else if (name === "edges")
-        parseEdgesBlock(body, spec.edges, spec.warnings);
+        parseEdgesBlock(body, spec.edges, spec.warnings, startLine);
       else if (name === "constraints")
-        parseConstraintsBlock(body, spec.constraints, spec.warnings);
+        parseConstraintsBlock(body, spec.constraints, spec.warnings, startLine);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

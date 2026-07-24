@@ -137,7 +137,9 @@ describe("formatGraphFile", () => {
     try {
       const result = formatGraphFile(file);
 
-      expect(result.errors).toEqual(["Unbalanced braces in DSL block"]);
+      expect(result.errors).toEqual([
+        "Unbalanced braces in DSL block at line 1",
+      ]);
       expect(fs.readFileSync(file, "utf8")).toBe(invalidText);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });

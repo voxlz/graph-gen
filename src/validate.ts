@@ -1,7 +1,13 @@
 import type { GraphSpec } from "./parse";
 
+export interface DiagnosticLocation {
+  file?: string;
+  line?: number;
+}
+
 export interface ValidationResult {
   errors: string[];
+  locations: DiagnosticLocation[];
 }
 
 function findOrderingCycle(
@@ -48,16 +54,21 @@ function findOrderingCycle(
 
 export function validateGraph(spec: GraphSpec): ValidationResult {
   const errors: string[] = [];
+  const locations: DiagnosticLocation[] = [];
+  const pushError = (message: string, source?: any) => {
+    errors.push(message);
+    locations.push({ file: source?.sourceFile, line: source?.line });
+  };
   const nodeIds = new Set<string>();
   const boundaryIds = new Set<string>();
 
   for (const node of spec.nodes) {
-    if (nodeIds.has(node.id)) errors.push(`duplicate node id: ${node.id}`);
+    if (nodeIds.has(node.id)) pushError(`duplicate node id: ${node.id}`, node);
     nodeIds.add(node.id);
   }
   for (const boundary of spec.boundaries) {
     if (boundaryIds.has(boundary.id)) {
-      errors.push(`duplicate boundary id: ${boundary.id}`);
+      pushError(`duplicate boundary id: ${boundary.id}`, boundary);
     }
     boundaryIds.add(boundary.id);
   }
@@ -84,29 +95,32 @@ export function validateGraph(spec: GraphSpec): ValidationResult {
   };
   for (const node of spec.nodes) {
     if (node.parent && !boundaryIds.has(node.parent)) {
-      errors.push(
+      pushError(
         `node ${node.id} references missing boundary: ${node.parent}`,
+        node,
       );
     }
   }
   for (const boundary of spec.boundaries) {
     if (boundary.parent && !boundaryIds.has(boundary.parent)) {
-      errors.push(
+      pushError(
         `boundary ${boundary.id} references missing parent boundary: ${boundary.parent}`,
+        boundary,
       );
     }
   }
 
   for (const edge of spec.edges) {
     if (!nodeIds.has(edge.source)) {
-      errors.push(`edge references missing source node: ${edge.source}`);
+      pushError(`edge references missing source node: ${edge.source}`, edge);
     }
     if (!nodeIds.has(edge.target)) {
-      errors.push(`edge references missing target node: ${edge.target}`);
+      pushError(`edge references missing target node: ${edge.target}`, edge);
     }
     if (edge.source === edge.target) {
-      errors.push(
+      pushError(
         `edge from a node to itself is not supported: ${edge.source}`,
+        edge,
       );
     }
   }
@@ -124,28 +138,39 @@ export function validateGraph(spec: GraphSpec): ValidationResult {
       }
     }
   };
-  const requireId = (id: string, context: string) => {
+  const requireId = (id: string, context: string, source: any) => {
     if (!knownIds.has(id))
-      errors.push(`${context} references missing node or boundary: ${id}`);
+      pushError(
+        `${context} references missing node or boundary: ${id}`,
+        source,
+      );
   };
 
   for (const constraint of spec.constraints) {
     if (constraint.type === "align") {
       if (constraint.axis !== "x" && constraint.axis !== "y") {
-        errors.push(`align constraint has invalid axis: ${constraint.axis}`);
+        pushError(
+          `align constraint has invalid axis: ${constraint.axis}`,
+          constraint,
+        );
       }
-      for (const id of constraint.ids ?? []) requireId(id, "align constraint");
+      for (const id of constraint.ids ?? []) {
+        requireId(id, "align constraint", constraint);
+      }
       continue;
     }
 
     const left = constraint.a ?? constraint.left ?? constraint.top;
     const right = constraint.b ?? constraint.right ?? constraint.bottom;
     if (!left || !right) {
-      errors.push(`constraint is missing an endpoint: ${constraint.type}`);
+      pushError(
+        `constraint is missing an endpoint: ${constraint.type}`,
+        constraint,
+      );
       continue;
     }
-    requireId(left, `constraint ${constraint.type}`);
-    requireId(right, `constraint ${constraint.type}`);
+    requireId(left, `constraint ${constraint.type}`, constraint);
+    requireId(right, `constraint ${constraint.type}`, constraint);
     switch (constraint.type) {
       case "left":
       case "top":
@@ -174,7 +199,10 @@ export function validateGraph(spec: GraphSpec): ValidationResult {
       case "near":
         break;
       default:
-        errors.push(`unsupported constraint type: ${constraint.type}`);
+        pushError(
+          `unsupported constraint type: ${constraint.type}`,
+          constraint,
+        );
     }
   }
 
@@ -182,11 +210,11 @@ export function validateGraph(spec: GraphSpec): ValidationResult {
     const cycle = findOrderingCycle(ordering[axis]);
     if (cycle) {
       const direction = axis === "x" ? "left/right" : "top/bottom";
-      errors.push(
+      pushError(
         `impossible ${direction} ordering (cycle): ${cycle.join(" -> ")} -> ${cycle[0]}`,
       );
     }
   }
 
-  return { errors };
+  return { errors, locations };
 }
