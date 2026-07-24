@@ -1,7 +1,7 @@
 // render-all.ts
-// Renders every sample/test graph into renders/, mirroring the source folder:
+// Renders every example graph into renders/, mirroring the source folder:
 //   graph.txt                 -> renders/graph.png
-//   tests/overlap.txt         -> renders/tests/overlap.png
+//   demo/showcase/overlap.txt -> renders/demo/showcase/overlap.png
 //   scopes/asrv_scope.txt     -> renders/scopes/asrv_scope.png
 //   example/parsedGraph...json-> renders/example/parsedGraphExample.png
 // Usage: tsx src/render-all.ts
@@ -14,14 +14,14 @@ const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "renders");
 fs.mkdirSync(outDir, { recursive: true });
 
-// graph.txt at the root (if present), every *.txt under tests/ and scopes/, and the JSON example
+// graph.txt at the root (if present), every *.txt under demo/ and scopes/, and the JSON example
 const inputs: string[] = [];
 if (fs.existsSync(path.join(rootDir, "graph.txt"))) inputs.push("graph.txt");
 for (const dir of [
-  "tests",
   "scopes",
   "usecases",
   "demo",
+  "demo/showcase",
   "demo/scopes",
   "demo/usecases",
 ]) {
@@ -36,7 +36,7 @@ if (fs.existsSync(path.join(rootDir, jsonExample))) inputs.push(jsonExample);
 
 const ext = ["p", "n", "g"].join(""); // built so the literal isn't in source noise
 for (const input of inputs) {
-  const subDir = path.dirname(input); // "." for root files, else "tests"/"scopes"/"example"
+  const subDir = path.dirname(input); // "." for root files, else a source subdirectory
   const base = path.basename(input).replace(/\.(txt|json)$/i, "");
   const destDir = subDir === "." ? outDir : path.join(outDir, subDir);
   fs.mkdirSync(destDir, { recursive: true });
