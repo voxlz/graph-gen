@@ -3,13 +3,11 @@ title "Weather API - Scope"
 nodes {
     box client: "API Client"
     actor attacker: "External Attacker"
-
     boundary vpc: "Service VPC" {
         circle api: "Weather API"
         database cache: "Redis Cache"
         database tsdb: "Time-series DB"
     }
-
     group providers {
         box noaa: "NOAA Feed"
         box satellite: "Satellite Provider"

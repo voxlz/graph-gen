@@ -3,7 +3,6 @@ title "Bookstore - Scope"
 nodes {
     box customer: "Customer"
     actor attacker: "External Attacker"
-
     boundary cloud: "Cloud VPC" {
         boundary docker: "Container Network" {
             circle gateway: "API Gateway"
@@ -13,7 +12,6 @@ nodes {
             database cache: "Redis Cache"
             actor rogue: "Compromised Container"
         }
-
         group external {
             box payments: "Payment Provider"
             box email: "Email Service"

@@ -80,10 +80,10 @@ Then render, mounting a folder so the PNG lands back on the host:
 
 ```bash
 mkdir -p out
-docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.txt out/output.png
+docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.ggn out/output.png
 ```
 
-The image appears at `./out/output.png` on your machine. Swap in your own `.txt`
+The image appears at `./out/output.png` on your machine. Swap in your own `.ggn`
 input path and output name as needed.
 
 To override the styles, mount your own style file and pass it as the third
@@ -91,7 +91,7 @@ argument (same as the local run):
 
 ```bash
 docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style.jsonc" \
-  graphgen demo/usecases/bookstore_uc1.txt out/output.png my-style.jsonc
+    graphgen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
 ```
 
 ## Showcase
@@ -183,7 +183,7 @@ and [Constraints](#constraints) for placement rules.
 In threat modeling you often times may want to reuse a "base graph" with new edges, do describe a dataflow. This is supported with `import "..."`, then declaring new edges:
 
 ```text
-import "../scopes/checkout_scope.txt"
+import "../scopes/checkout_scope.ggn"
 
 edges {
     customer --> api: "1. GET /checkout"

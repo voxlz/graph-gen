@@ -16,10 +16,8 @@ nodes {
     group extras {
         circle hub: "Hub"
         box orbit: "near"
-
         box rowA: "align row"
         box rowB: "align row"
-
         box colA: "align col"
         box colB: "align col"
     }
@@ -34,7 +32,6 @@ edges {
     center --- nw
     center --- se
     center --- sw
-
     hub --- orbit
     rowA --- rowB
     colA --- colB

@@ -1,10 +1,10 @@
 // index.ts
-// Usage: tsx src/index.ts <input.txt|input.json> <output.png> [style.jsonc]
+// Usage: tsx src/index.ts <input.ggn|input.json> <output.png> [style.jsonc]
 //
 // Pipeline:
-//  1. Format and load the graph spec. A .txt input is normalized by format.ts
+//  1. Format and load the graph spec. A .ggn input is normalized by format.ts
 //     and parsed by parse.ts into the intermediate JSON representation; a .json
-//     input is treated as that intermediate representation directly.
+//     input is treated as that representation directly.
 //  2. Merge styling: style.json provides the global defaults, the graph's own
 //     `shapes` block overrides them per shape.
 //  3. Translate directional graph rules into WebCola
@@ -26,7 +26,7 @@ import {
 } from "./parse";
 import { validateGraph } from "./validate";
 
-const inputPath = process.argv[2] || "graph.txt";
+const inputPath = process.argv[2] || "graph.ggn";
 const outputPath = process.argv[3] || "output.png";
 // Optional: a custom global style file (falls back to style.jsonc/style.json).
 const stylePath = process.argv[4];
@@ -41,7 +41,8 @@ function parseJsonc(text: string): any {
 // --- load spec (parse DSL or read intermediate JSON), resolving imports -----
 function parseFile(file: string): ParseResult {
   try {
-    if (path.extname(file).toLowerCase() === ".txt") {
+    const extension = path.extname(file).toLowerCase();
+    if (extension === ".ggn") {
       const formatted = formatGraphFile(file);
       if (formatted.errors.length > 0) {
         return {
@@ -50,6 +51,12 @@ function parseFile(file: string): ParseResult {
         };
       }
       return parseGraphText(formatted.formatted);
+    }
+    if (extension !== ".json") {
+      return {
+        spec: emptyGraphSpec(),
+        errors: [`${file}: unsupported graph input extension: ${extension}`],
+      };
     }
     const raw = fs.readFileSync(file, "utf8");
     const data = parseJsonc(raw);

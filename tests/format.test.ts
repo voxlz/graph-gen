@@ -37,7 +37,7 @@ box catalog
 
   it("collapses repeated blank lines in imported graph files", () => {
     const result = formatGraphText(`
-import "../scopes/bookstore_scope.txt"
+import "../scopes/bookstore_scope.ggn"
 
 title "Bookstore - UC2 - Track a shipment"
 
@@ -69,7 +69,7 @@ edges {
 `);
 
     expect(result.errors).toEqual([]);
-    expect(result.formatted).toBe(`import "../scopes/bookstore_scope.txt"
+    expect(result.formatted).toBe(`import "../scopes/bookstore_scope.ggn"
 
 title "Bookstore - UC2 - Track a shipment"
 
@@ -95,7 +95,7 @@ edges {
 describe("formatGraphFile", () => {
   it("rewrites valid parsed graph files", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
-    const file = path.join(directory, "graph.txt");
+    const file = path.join(directory, "graph.ggn");
     fs.writeFileSync(file, "nodes {\nbox customer\n}");
 
     try {
@@ -112,7 +112,7 @@ describe("formatGraphFile", () => {
 
   it("does not rewrite files with parse errors", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
-    const file = path.join(directory, "graph.txt");
+    const file = path.join(directory, "graph.ggn");
     const invalidText = "nodes {\nbox customer\n";
     fs.writeFileSync(file, invalidText);
 

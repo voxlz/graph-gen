@@ -1,5 +1,5 @@
 // verify.ts — programmatic checks on a layout dump produced via GRAPHGEN_DUMP.
-// Usage: tsx src/verify.ts <dump.json> [rulesFile.txt-or-json]
+// Usage: tsx src/verify.ts <dump.json> [rulesFile.ggn-or-json]
 //
 // Checks:
 //   1. all node positions are finite
@@ -72,7 +72,7 @@ if (rulesPath) {
   console.log("[explicit constraints]");
   const raw = fs.readFileSync(rulesPath, "utf8");
   let constraints;
-  if (path.extname(rulesPath).toLowerCase() === ".txt") {
+  if (path.extname(rulesPath).toLowerCase() === ".ggn") {
     constraints = parseGraphText(raw).spec.constraints;
   } else {
     constraints =

@@ -1,4 +1,4 @@
-import "../scopes/bookstore_scope.txt"
+import "../scopes/bookstore_scope.ggn"
 
 title "Bookstore - UC1 - Browse and place an order"
 

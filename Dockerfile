@@ -20,6 +20,6 @@ COPY style.jsonc ./
 COPY demo ./demo
 
 # Usage:
-#   docker run -v $(pwd)/out:/app/out graphgen demo/usecases/bookstore_uc1.txt out/output.png
+#   docker run -v $(pwd)/out:/app/out graphgen demo/usecases/bookstore_uc1.ggn out/output.png
 ENTRYPOINT ["npx", "tsx", "src/index.ts"]
-CMD ["demo/usecases/bookstore_uc1.txt", "output.png"]
+CMD ["demo/usecases/bookstore_uc1.ggn", "output.png"]

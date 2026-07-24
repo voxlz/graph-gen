@@ -1,4 +1,4 @@
-import "../scopes/weather_scope.txt"
+import "../scopes/weather_scope.ggn"
 
 title "Weather API - UC1 - Fetch current conditions"
 

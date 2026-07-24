@@ -5,8 +5,8 @@
 //   tsx src/generate.ts <input1> <output1> [<input2> <output2> ...]
 //
 // Example:
-//   tsx src/generate.ts demo/usecases/bookstore_uc1.txt out/bookstore_uc1.png \
-//                     demo/scopes/weather_scope.txt  out/weather_scope.png
+//   tsx src/generate.ts demo/usecases/bookstore_uc1.ggn out/bookstore_uc1.png \
+//                     demo/scopes/weather_scope.ggn  out/weather_scope.png
 //
 // Each pair is rendered by index.ts. Missing input files or an odd number of
 // arguments are reported and cause a non-zero exit.

@@ -1,5 +1,5 @@
 // parse.ts
-// Parses the graph DSL (*.txt) into the intermediate JSON representation
+// Parses the graph DSL (*.ggn) into the intermediate JSON representation
 // consumed by index.ts. The intermediate shape mirrors parsedGraphExample.json:
 //
 //   {
