@@ -41,6 +41,7 @@ for (const input of inputs) {
   const destDir = subDir === "." ? outDir : path.join(outDir, subDir);
   fs.mkdirSync(destDir, { recursive: true });
   const output = path.join(destDir, `${base}.${ext}`);
+  // index.ts formats every .txt input before parsing and rendering it.
   execFileSync("tsx", ["src/index.ts", input, output], {
     stdio: "inherit",
     cwd: rootDir,

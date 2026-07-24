@@ -12,6 +12,8 @@ edges {
     orders --> postgres: "3. READ {order, shipment ref}"
     orders --> shipping: "4. GET tracking {shipment ref}"
     shipping --> orders: "5. Return {status, ETA}"
+
+    // comment
     orders --> gateway: "6. Return {tracking}"
     gateway --> customer: "7. Return {status + ETA}"
 }

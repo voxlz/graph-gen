@@ -2,9 +2,9 @@
 // Usage: tsx src/index.ts <input.txt|input.json> <output.png> [style.jsonc]
 //
 // Pipeline:
-//  1. Load the graph spec. A .txt input is parsed by parse.ts into the
-//     intermediate JSON representation; a .json input is treated as that
-//     intermediate representation directly.
+//  1. Format and load the graph spec. A .txt input is normalized by format.ts
+//     and parsed by parse.ts into the intermediate JSON representation; a .json
+//     input is treated as that intermediate representation directly.
 //  2. Merge styling: style.json provides the global defaults, the graph's own
 //     `shapes` block overrides them per shape.
 //  3. Translate directional graph rules into WebCola
@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as cola from "webcola";
 import { createCanvas } from "canvas";
+import { formatGraphFile } from "./format";
 import {
   emptyGraphSpec,
   parseGraphText,
@@ -40,10 +41,17 @@ function parseJsonc(text: string): any {
 // --- load spec (parse DSL or read intermediate JSON), resolving imports -----
 function parseFile(file: string): ParseResult {
   try {
-    const raw = fs.readFileSync(file, "utf8");
     if (path.extname(file).toLowerCase() === ".txt") {
-      return parseGraphText(raw);
+      const formatted = formatGraphFile(file);
+      if (formatted.errors.length > 0) {
+        return {
+          spec: emptyGraphSpec(),
+          errors: formatted.errors.map((error) => `${file}: ${error}`),
+        };
+      }
+      return parseGraphText(formatted.formatted);
     }
+    const raw = fs.readFileSync(file, "utf8");
     const data = parseJsonc(raw);
     return {
       spec: {
