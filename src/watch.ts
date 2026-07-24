@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { parseGraphText } from "./parse";
 
 const rootDir = path.resolve(__dirname, "..");
 const rendersDir = path.join(rootDir, "renders");
@@ -44,6 +45,38 @@ export function outputPathFor(file: string): string {
     rendersDir,
     `${path.basename(file, path.extname(file))}.png`,
   );
+}
+
+export function findDependentGraphFiles(
+  changedFile: string,
+  graphFiles: string[],
+): string[] {
+  const importers = new Map<string, Set<string>>();
+  for (const file of graphFiles) {
+    try {
+      const imports = parseGraphText(fs.readFileSync(file, "utf8")).spec
+        .imports;
+      for (const imported of imports) {
+        const dependency = path.resolve(path.dirname(file), imported);
+        if (!importers.has(dependency)) importers.set(dependency, new Set());
+        importers.get(dependency)?.add(file);
+      }
+    } catch {
+      // A temporarily unreadable file is retried on its next save event.
+    }
+  }
+
+  const dependents = new Set<string>();
+  const pending = [path.resolve(changedFile)];
+  while (pending.length > 0) {
+    const dependency = pending.shift() as string;
+    for (const importer of importers.get(dependency) ?? []) {
+      if (dependents.has(importer)) continue;
+      dependents.add(importer);
+      pending.push(importer);
+    }
+  }
+  return [...dependents].sort();
 }
 
 function printError(message: string) {
@@ -113,7 +146,7 @@ export function startWatch(targetPath = process.cwd()) {
     void processQueue();
   };
 
-  const queueFile = (file: string) => {
+  const queueFile = (file: string, includeDependents = true) => {
     if (path.extname(file).toLowerCase() !== ".ggn") return;
     const previous = timers.get(file);
     if (previous) clearTimeout(previous);
@@ -124,6 +157,12 @@ export function startWatch(targetPath = process.cwd()) {
         timers.delete(file);
         if (!fs.existsSync(file)) return;
         queued.add(file);
+        if (includeDependents) {
+          const graphFiles = findGraphFiles(target);
+          for (const dependent of findDependentGraphFiles(file, graphFiles)) {
+            queueFile(dependent, false);
+          }
+        }
         void processQueue();
       }, 150),
     );
@@ -131,9 +170,8 @@ export function startWatch(targetPath = process.cwd()) {
 
   const initialFiles = findGraphFiles(target);
   console.log(
-    `[watch] watching ${target} (${initialFiles.length} .ggn file(s))`,
+    `[watch] watching ${target} (${initialFiles.length} .ggn file(s)); waiting for changes`,
   );
-  for (const file of initialFiles) queueFile(file);
 
   const watcher = fs.watch(
     watchDirectory,
