@@ -9,6 +9,9 @@
     "labelBand": 20, // extra top room inside a boundary for its label
     "nestPad": 36, // extra padding per nesting level (parent label clears nested border)
     "iterations": [0, 100, 1000], // WebCola solver passes [unconstrained, userConstraint, allConstraint]
+    "layout": "constraint", // "constraint" (default) or legacy "cola"
+    "layoutIterations": 1000, // hard limit for the constraint solver
+    "debugFrameEvery": 0, // set to 5 to write a PNG every five solver iterations
     "lines": "direct", // "direct" or "curved" or "angled". lets only support direct for now.
   },
   "shapes": {

@@ -3,6 +3,10 @@ import path from "node:path";
 import * as cola from "webcola";
 import { createCanvas } from "canvas";
 import { stripComments, type GraphSpec } from "./parse";
+import {
+  solveConstraintLayout,
+  type LayoutSnapshot,
+} from "./constraint-layout";
 
 export interface RenderResult {
   width: number;
@@ -81,6 +85,132 @@ async function writePng(
     out.on("finish", resolve);
     stream.pipe(out);
   });
+}
+
+async function writeDebugFrames(
+  snapshots: LayoutSnapshot[],
+  outputPath: string,
+  edges: any[],
+): Promise<void> {
+  if (snapshots.length === 0) return;
+  const margin = 50;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const snapshot of snapshots) {
+    for (const node of snapshot.nodes) {
+      minX = Math.min(minX, node.x - node.width / 2);
+      maxX = Math.max(maxX, node.x + node.width / 2);
+      minY = Math.min(minY, node.y - node.height / 2);
+      maxY = Math.max(maxY, node.y + node.height / 2);
+    }
+    for (const group of snapshot.groups) {
+      if (!group.rect) continue;
+      minX = Math.min(minX, group.rect.minX);
+      maxX = Math.max(maxX, group.rect.maxX);
+      minY = Math.min(minY, group.rect.minY);
+      maxY = Math.max(maxY, group.rect.maxY);
+    }
+    for (const label of snapshot.labels) {
+      minX = Math.min(minX, label.x - label.width / 2 - 4);
+      maxX = Math.max(maxX, label.x + label.width / 2 + 4);
+      minY = Math.min(minY, label.y - label.height / 2 - 2);
+      maxY = Math.max(maxY, label.y + label.height / 2 + 2);
+    }
+  }
+  if (!Number.isFinite(minX)) return;
+  const width = Math.max(160, Math.ceil(maxX - minX + margin * 2));
+  const height = Math.max(120, Math.ceil(maxY - minY + margin * 2));
+  const frameDirectory = path.join(
+    path.dirname(outputPath),
+    `${path.basename(outputPath, path.extname(outputPath))}.frames`,
+  );
+  fs.mkdirSync(frameDirectory, { recursive: true });
+  for (const snapshot of snapshots) {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    const tx = (x: number) => x - minX + margin;
+    const ty = (y: number) => y - minY + margin;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = snapshot.violations === 0 ? "#157347" : "#b42318";
+    ctx.fillText(
+      `iteration ${snapshot.iteration} | violations ${snapshot.violations}`,
+      10,
+      10,
+    );
+    for (const group of snapshot.groups) {
+      if (!group.rect) continue;
+      ctx.strokeStyle = "#8c8c8c";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(
+        tx(group.rect.minX),
+        ty(group.rect.minY),
+        group.rect.maxX - group.rect.minX,
+        group.rect.maxY - group.rect.minY,
+      );
+      ctx.setLineDash([]);
+    }
+    const nodeById = new Map(snapshot.nodes.map((node) => [node.id, node]));
+    ctx.strokeStyle = "#555555";
+    for (const edge of edges) {
+      const sourceId =
+        typeof edge.source === "number" ? edge._sourceId : edge.source.id;
+      const targetId =
+        typeof edge.target === "number" ? edge._targetId : edge.target.id;
+      const source = nodeById.get(sourceId);
+      const target = nodeById.get(targetId);
+      if (!source || !target) continue;
+      ctx.beginPath();
+      ctx.moveTo(tx(source.x), ty(source.y));
+      ctx.lineTo(tx(target.x), ty(target.y));
+      ctx.stroke();
+    }
+    for (const node of snapshot.nodes) {
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#1f5f8b";
+      ctx.fillRect(
+        tx(node.x - node.width / 2),
+        ty(node.y - node.height / 2),
+        node.width,
+        node.height,
+      );
+      ctx.strokeRect(
+        tx(node.x - node.width / 2),
+        ty(node.y - node.height / 2),
+        node.width,
+        node.height,
+      );
+      ctx.fillStyle = "#111111";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(node.id, tx(node.x), ty(node.y));
+    }
+    for (const label of snapshot.labels) {
+      ctx.fillStyle = "#fff7d6";
+      ctx.fillRect(
+        tx(label.x - label.width / 2 - 4),
+        ty(label.y - label.height / 2 - 2),
+        label.width + 8,
+        label.height + 4,
+      );
+      ctx.fillStyle = "#222222";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label.text.replace(/\n/g, " / "), tx(label.x), ty(label.y));
+    }
+    await writePng(
+      canvas,
+      path.join(
+        frameDirectory,
+        `iteration-${String(snapshot.iteration).padStart(4, "0")}.png`,
+      ),
+    );
+  }
 }
 
 function errorGraphLines(errors: string[]): string[] {
@@ -189,6 +319,24 @@ export async function renderGraph(
     // allConstraint]. Overridable via style or the GRAPHGEN_ITERS env var.
     iterations: spec.graph?.iterations ??
       globalStyle.graph?.iterations ?? [0, 100, 1000],
+    layout: String(
+      process.env.GRAPHGEN_LAYOUT ??
+        spec.graph?.layout ??
+        globalStyle.graph?.layout ??
+        "constraint",
+    ).toLowerCase(),
+    layoutIterations: Number(
+      process.env.GRAPHGEN_LAYOUT_ITERS ??
+        spec.graph?.layoutIterations ??
+        globalStyle.graph?.layoutIterations ??
+        1000,
+    ),
+    debugFrameEvery: Number(
+      process.env.GRAPHGEN_DEBUG_FRAMES ??
+        spec.graph?.debugFrameEvery ??
+        globalStyle.graph?.debugFrameEvery ??
+        0,
+    ),
   };
 
   // --- text measuring (for sizing nodes to their labels) ----------------------
@@ -298,7 +446,15 @@ export async function renderGraph(
     links.push({
       source: s,
       target: t,
+      _sourceId: nodes[s].id,
+      _targetId: nodes[t].id,
       label: e.label,
+      labelWidth: e.label
+        ? Math.max(
+            ...e.label.split("\n").map((line: string) => textWidth(line)),
+          )
+        : 0,
+      labelHeight: e.label ? e.label.split("\n").length * 16 : 0,
       // support DSL booleans and the legacy `type` field ("rightArrow"/"leftArrow"/"line")
       arrowSource: e.arrowSource,
       arrowTarget: e.arrowTarget,
@@ -437,7 +593,7 @@ export async function renderGraph(
     }
   }
 
-  // "near" is modelled as an extra short attractive link
+  // "near" is modelled as an extra short attractive link in the Cola engine.
   const layoutLinks = links.concat(nearPairs);
 
   // --- run the solver ---------------------------------------------------------
@@ -484,32 +640,67 @@ export async function renderGraph(
   // WebCola's avoidOverlaps keeps node rectangles from overlapping but lets them
   // touch (zero gap). To enforce a minimum clearance we inflate every node by
   // nodeGap for the duration of the solve, then restore the true render size.
-  const GAP = graphMeta.nodeGap;
-  for (const n of nodes) {
-    n.width += GAP;
-    n.height += GAP;
-  }
-  const styleIters =
-    Array.isArray(graphMeta.iterations) &&
-    graphMeta.iterations.length === 3 &&
-    graphMeta.iterations.every(Number.isFinite)
-      ? graphMeta.iterations
-      : [0, 100, 1000];
-  const envIters = (process.env.GRAPHGEN_ITERS || "").split(",").map(Number);
-  const [i1, i2, i3] =
-    envIters.length === 3 && envIters.every(Number.isFinite)
-      ? envIters
-      : styleIters;
-  layout.start(i1, i2, i3, 0, false);
-  for (const n of nodes) {
-    n.width -= GAP;
-    n.height -= GAP;
+  let constraintGroupRects: Map<string, any> | null = null;
+  if (graphMeta.layout === "constraint") {
+    const result = solveConstraintLayout(
+      nodes,
+      boundaries,
+      links,
+      spec.constraints || [],
+      {
+        minGap: graphMeta.minGap,
+        nodeGap: graphMeta.nodeGap,
+        boundaryPad: graphMeta.boundaryPad,
+        labelBand: graphMeta.labelBand,
+        nestPad: graphMeta.nestPad,
+        iterations: Number.isFinite(graphMeta.layoutIterations)
+          ? Math.max(1, Math.floor(graphMeta.layoutIterations))
+          : 1000,
+        debugFrameEvery: Number.isFinite(graphMeta.debugFrameEvery)
+          ? Math.max(0, Math.floor(graphMeta.debugFrameEvery))
+          : 0,
+      },
+    );
+    constraintGroupRects = result.groups;
+    await writeDebugFrames(result.snapshots, outputPath, links);
+    if (!result.valid) {
+      const details = result.violations.slice(0, 8).join("; ");
+      throw new Error(
+        `constraint layout did not converge after ${result.iterations} iterations: ${details}`,
+      );
+    }
+  } else if (graphMeta.layout === "cola") {
+    const GAP = graphMeta.nodeGap;
+    for (const n of nodes) {
+      n.width += GAP;
+      n.height += GAP;
+    }
+    const styleIters =
+      Array.isArray(graphMeta.iterations) &&
+      graphMeta.iterations.length === 3 &&
+      graphMeta.iterations.every(Number.isFinite)
+        ? graphMeta.iterations
+        : [0, 100, 1000];
+    const envIters = (process.env.GRAPHGEN_ITERS || "").split(",").map(Number);
+    const [i1, i2, i3] =
+      envIters.length === 3 && envIters.every(Number.isFinite)
+        ? envIters
+        : styleIters;
+    layout.start(i1, i2, i3, 0, false);
+    for (const n of nodes) {
+      n.width -= GAP;
+      n.height -= GAP;
+    }
+  } else {
+    throw new Error(
+      `unknown graph.layout ${JSON.stringify(graphMeta.layout)}; expected "constraint" or "cola"`,
+    );
   }
 
   // Alignment constraints are equalities the solver may fail to satisfy when they
   // fight separation/overlap rules. Warn if any aligned set didn't line up, so a
   // contradictory layout is surfaced rather than silently skewed.
-  for (const c of colaConstraints) {
+  for (const c of graphMeta.layout === "cola" ? colaConstraints : []) {
     if (c.type !== "alignment") continue;
     const coords = c.offsets.map((o: any) => nodes[o.node][c.axis]);
     const spread = Math.max(...coords) - Math.min(...coords);
@@ -568,7 +759,7 @@ export async function renderGraph(
   // disjoint groups from overlapping and nested groups contained, so no manual
   // separation pass is needed; we just draw a box around each group's members.
   groups.forEach((g, gi) => {
-    g._rect = renderRect(gi);
+    g._rect = constraintGroupRects?.get(boundaries[gi].id) ?? renderRect(gi);
   });
 
   // --- optional debug dump (positions + group rects) for testing --------------
@@ -881,11 +1072,12 @@ export async function renderGraph(
       const horizontal = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y);
       edgeLabels.push({
         text: link.label,
-        x: ax,
+        x: link.labelX == null ? ax : tx(link.labelX),
         // anchor: the true midpoint the label belongs to (before the offset)
-        ax,
-        ay,
-        offset: horizontal,
+        ax: link.labelAnchorX == null ? ax : tx(link.labelAnchorX),
+        ay: link.labelAnchorY == null ? ay : ty(link.labelAnchorY),
+        y: link.labelY == null ? undefined : ty(link.labelY),
+        offset: link.labelY == null && horizontal,
       });
     }
   }
@@ -955,7 +1147,7 @@ export async function renderGraph(
     const totalH = lines.length * lineH;
     // Offset labels sit fully below the anchor so the chip never hides the line,
     // regardless of how many lines the label has.
-    const y = lbl.offset ? lbl.ay + totalH / 2 + 8 : lbl.ay;
+    const y = lbl.y ?? (lbl.offset ? lbl.ay + totalH / 2 + 8 : lbl.ay);
     const top = y - totalH / 2;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(lbl.x - maxW / 2 - 4, top - 2, maxW + 8, totalH + 4);

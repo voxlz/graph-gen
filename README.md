@@ -211,6 +211,14 @@ styles; only the file being rendered contributes edges.
 - `graph.iterations` — the three WebCola solver passes
   `[unconstrained, userConstraint, allConstraint]` (also overridable at runtime
   with `GRAPHGEN_ITERS=a,b,c`).
+- `graph.layout` — layout engine: `constraint` (default) or the legacy `cola`
+  engine. Override it with `GRAPHGEN_LAYOUT`.
+- `graph.layoutIterations` — maximum custom-solver iterations, default `1000`.
+  Override it with `GRAPHGEN_LAYOUT_ITERS`.
+- `graph.debugFrameEvery` — write a solver progress PNG every N iterations. It
+  defaults to `0` (disabled); set it to `5`, for example, to write frames beside
+  the output in `<output-name>.frames/`. Override it with
+  `GRAPHGEN_DEBUG_FRAMES`.
 - `shapes.<name>` — per-shape `color`, `lineStyle` (`solid`/`dashed`),
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
