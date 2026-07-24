@@ -15,10 +15,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
-COPY index.js parser.js render-all.js generate.js verify.js style.jsonc ./
+COPY src ./src
+COPY style.jsonc ./
 COPY demo ./demo
 
 # Usage:
 #   docker run -v $(pwd)/out:/app/out graphgen demo/usecases/bookstore_uc1.txt out/output.png
-ENTRYPOINT ["node", "index.js"]
+ENTRYPOINT ["npx", "tsx", "src/index.ts"]
 CMD ["demo/usecases/bookstore_uc1.txt", "output.png"]

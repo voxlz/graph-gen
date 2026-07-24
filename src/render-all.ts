@@ -1,21 +1,22 @@
-// render-all.js
+// render-all.ts
 // Renders every sample/test graph into renders/, mirroring the source folder:
 //   graph.txt                 -> renders/graph.png
 //   tests/overlap.txt         -> renders/tests/overlap.png
 //   scopes/asrv_scope.txt     -> renders/scopes/asrv_scope.png
 //   example/parsedGraph...json-> renders/example/parsedGraphExample.png
-// Usage: node render-all.js
+// Usage: tsx src/render-all.ts
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const outDir = path.join(__dirname, "renders");
+const rootDir = path.resolve(__dirname, "..");
+const outDir = path.join(rootDir, "renders");
 fs.mkdirSync(outDir, { recursive: true });
 
 // graph.txt at the root (if present), every *.txt under tests/ and scopes/, and the JSON example
-const inputs = [];
-if (fs.existsSync(path.join(__dirname, "graph.txt"))) inputs.push("graph.txt");
+const inputs: string[] = [];
+if (fs.existsSync(path.join(rootDir, "graph.txt"))) inputs.push("graph.txt");
 for (const dir of [
   "tests",
   "scopes",
@@ -24,14 +25,14 @@ for (const dir of [
   "demo/scopes",
   "demo/usecases",
 ]) {
-  const d = path.join(__dirname, dir);
+  const d = path.join(rootDir, dir);
   if (!fs.existsSync(d)) continue;
   for (const f of fs.readdirSync(d).sort()) {
     if (f.toLowerCase().endsWith(".txt")) inputs.push(path.join(dir, f));
   }
 }
 const jsonExample = path.join("example", "parsedGraphExample.json");
-if (fs.existsSync(path.join(__dirname, jsonExample))) inputs.push(jsonExample);
+if (fs.existsSync(path.join(rootDir, jsonExample))) inputs.push(jsonExample);
 
 const ext = ["p", "n", "g"].join(""); // built so the literal isn't in source noise
 for (const input of inputs) {
@@ -40,9 +41,9 @@ for (const input of inputs) {
   const destDir = subDir === "." ? outDir : path.join(outDir, subDir);
   fs.mkdirSync(destDir, { recursive: true });
   const output = path.join(destDir, `${base}.${ext}`);
-  execFileSync("node", ["index.js", input, output], {
+  execFileSync("tsx", ["src/index.ts", input, output], {
     stdio: "inherit",
-    cwd: __dirname,
+    cwd: rootDir,
   });
 }
 

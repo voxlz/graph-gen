@@ -1,8 +1,8 @@
-// index.js
-// Usage: node index.js <input.txt|input.json> <output.png> [style.jsonc]
+// index.ts
+// Usage: tsx src/index.ts <input.txt|input.json> <output.png> [style.jsonc]
 //
 // Pipeline:
-//  1. Load the graph spec. A .txt input is parsed by parser.js into the
+//  1. Load the graph spec. A .txt input is parsed by parser.ts into the
 //     intermediate JSON representation; a .json input is treated as that
 //     intermediate representation directly.
 //  2. Merge styling: style.json provides the global defaults, the graph's own
@@ -24,14 +24,14 @@ const outputPath = process.argv[3] || "output.png";
 const stylePath = process.argv[4];
 
 // --- tolerant JSON (allows // comments and trailing commas) -----------------
-function parseJsonc(text) {
+function parseJsonc(text: string): any {
   const noComments = stripComments(text);
   const noTrailingCommas = noComments.replace(/,(\s*[}\]])/g, "$1");
   return JSON.parse(noTrailingCommas);
 }
 
 // --- load spec (parse DSL or read intermediate JSON), resolving imports -----
-function parseFile(file) {
+function parseFile(file: string): any {
   const raw = fs.readFileSync(file, "utf8");
   return path.extname(file).toLowerCase() === ".txt"
     ? parseGraphText(raw)
@@ -41,19 +41,22 @@ function parseFile(file) {
 // Merge `src` into `target`. Imported graphs contribute nodes / boundaries /
 // constraints / shapes / graph settings; edges are only taken when includeEdges
 // is true (so an importer keeps its own edges, not the base graph's).
-function mergeSpec(target, src, includeEdges) {
+function mergeSpec(target: any, src: any, includeEdges: boolean) {
   Object.assign(target.graph, src.graph || {});
   for (const [name, style] of Object.entries(src.shapes || {})) {
-    target.shapes[name] = { ...(target.shapes[name] || {}), ...style };
+    target.shapes[name] = {
+      ...(target.shapes[name] || {}),
+      ...(style as Record<string, unknown>),
+    };
   }
-  const nodeIds = new Set(target.nodes.map((n) => n.id));
+  const nodeIds = new Set(target.nodes.map((n: any) => n.id));
   for (const n of src.nodes || []) {
     if (!nodeIds.has(n.id)) {
       target.nodes.push(n);
       nodeIds.add(n.id);
     }
   }
-  const bIds = new Set(target.boundaries.map((b) => b.id));
+  const bIds = new Set(target.boundaries.map((b: any) => b.id));
   for (const b of src.boundaries || []) {
     if (!bIds.has(b.id)) {
       target.boundaries.push(b);
@@ -65,13 +68,13 @@ function mergeSpec(target, src, includeEdges) {
   target.warnings.push(...(src.warnings || []));
 }
 
-function loadSpec(file, seen = new Set()) {
+function loadSpec(file: string, seen = new Set<string>()): any {
   const abs = path.resolve(file);
   const spec = parseFile(abs);
   if (!spec.imports || spec.imports.length === 0) return spec;
 
   seen.add(abs);
-  const merged = {
+  const merged: any = {
     graph: {},
     shapes: {},
     nodes: [],
@@ -110,7 +113,7 @@ const globalStyle = (() => {
     return parseJsonc(fs.readFileSync(stylePath, "utf8"));
   }
   for (const name of ["style.jsonc", "style.json"]) {
-    const p = path.join(__dirname, name);
+    const p = path.join(__dirname, "..", name);
     if (fs.existsSync(p)) return parseJsonc(fs.readFileSync(p, "utf8"));
   }
   return { graph: {}, shapes: {} };
@@ -127,7 +130,7 @@ const FALLBACK_SHAPE = {
   borderRadius: 8,
 };
 
-const shapeStyles = {};
+const shapeStyles: Record<string, any> = {};
 const allShapeNames = new Set([
   ...Object.keys(globalStyle.shapes || {}),
   ...Object.keys(spec.shapes || {}),
@@ -139,7 +142,7 @@ for (const name of allShapeNames) {
     ...((spec.shapes || {})[name] || {}),
   };
 }
-function styleFor(shape) {
+function styleFor(shape: string): any {
   return shapeStyles[shape] || FALLBACK_SHAPE;
 }
 
@@ -174,13 +177,13 @@ const TITLE_FONT = "bold 22px sans-serif";
 const measureCanvas = createCanvas(10, 10);
 const measureCtx = measureCanvas.getContext("2d");
 measureCtx.font = NODE_FONT;
-function textWidth(s) {
+function textWidth(s: string): number {
   return measureCtx.measureText(s).width;
 }
 
 // --- build node list --------------------------------------------------------
-const idToIndex = {};
-const nodes = spec.nodes.map((n, i) => {
+const idToIndex: Record<string, number> = {};
+const nodes: any[] = spec.nodes.map((n: any, i: number) => {
   const style = styleFor(n.shape);
   const label = n.label ?? n.id;
   const width = Math.max(
@@ -203,12 +206,12 @@ const nodes = spec.nodes.map((n, i) => {
 });
 
 // --- build groups from boundaries -------------------------------------------
-const boundaries = spec.boundaries || [];
-const boundaryIdToGroupIndex = {};
+const boundaries: any[] = spec.boundaries || [];
+const boundaryIdToGroupIndex: Record<string, number> = {};
 boundaries.forEach((b, gi) => (boundaryIdToGroupIndex[b.id] = gi));
 
 const boundariesById = Object.fromEntries(boundaries.map((x) => [x.id, x]));
-function boundaryDepth(b) {
+function boundaryDepth(b: any): number {
   let depth = 0;
   let cur = b;
   while (cur && cur.parent && boundariesById[cur.parent]) {
@@ -221,12 +224,12 @@ const maxDepth = boundaries.reduce((m, b) => Math.max(m, boundaryDepth(b)), 0);
 const BASE_PAD = graphMeta.boundaryPad; // clear gap between a boundary's nodes and its border
 const LABEL_BAND = graphMeta.labelBand; // extra top room so the boundary label never touches nodes
 const NEST_PAD = graphMeta.nestPad; // extra padding per nesting level (parent label clears nested border)
-function paddingFor(b) {
+function paddingFor(b: any): number {
   // outer boundaries get more padding so nested ones sit visibly inside
   return BASE_PAD + NEST_PAD * (maxDepth - boundaryDepth(b));
 }
 
-const groups = boundaries.map((b) => ({
+const groups: any[] = boundaries.map((b) => ({
   id: b.id,
   label: b.label,
   leaves: [],
@@ -257,8 +260,8 @@ boundaries.forEach((b, gi) => {
 });
 
 // --- build links ------------------------------------------------------------
-const links = [];
-const nearPairs = [];
+const links: any[] = [];
+const nearPairs: any[] = [];
 for (const e of spec.edges || []) {
   const s = idToIndex[e.source];
   const t = idToIndex[e.target];
@@ -280,13 +283,13 @@ for (const e of spec.edges || []) {
 }
 
 // --- translate constraints --------------------------------------------------
-function halfExtent(node, axis) {
+function halfExtent(node: any, axis: string): number {
   return axis === "x" ? node.width / 2 : node.height / 2;
 }
 
 // All leaf-node indices that belong (directly or via nesting) to a boundary.
-function boundaryMembers(bid) {
-  const res = [];
+function boundaryMembers(bid: string): number[] {
+  const res: number[] = [];
   nodes.forEach((n, i) => {
     let p = n.boundaryParent;
     while (p) {
@@ -302,7 +305,7 @@ function boundaryMembers(bid) {
 
 // Resolve an id to the node indices it stands for: a plain node -> itself, a
 // boundary -> all of its member nodes. Returns null for unknown ids.
-function membersOf(id) {
+function membersOf(id: string): number[] | null {
   if (idToIndex[id] != null) return [idToIndex[id]];
   if (boundaryIdToGroupIndex[id] != null) return boundaryMembers(id);
   return null;
@@ -314,7 +317,7 @@ function membersOf(id) {
 // (WebCola's separation constraints are node-indexed only; groups themselves
 // get automatic containment/non-overlap but no user ordering API, so we expand
 // group rules into member-level constraints here.)
-function sep(axis, aId, bId, out) {
+function sep(axis: string, aId: string, bId: string, out: any[]): void {
   const A = membersOf(aId);
   const B = membersOf(bId);
   if (!A || !B || A.length === 0 || B.length === 0) {
@@ -334,7 +337,7 @@ function sep(axis, aId, bId, out) {
   }
 }
 
-const colaConstraints = [];
+const colaConstraints: any[] = [];
 for (const rule of spec.constraints || []) {
   const type = rule.type;
   // accept both the DSL { type, a, b } and legacy { type, left/right/top/bottom }
@@ -387,7 +390,7 @@ for (const rule of spec.constraints || []) {
       // Align nodes on a shared line: WebCola axis "x" => same x (a vertical
       // line), axis "y" => same y (a horizontal line). Ids may be nodes or
       // boundaries/groups (expanded to their members).
-      const idxs = [];
+      const idxs: number[] = [];
       let ok = true;
       for (const id of rule.ids || []) {
         const m = membersOf(id);
@@ -422,7 +425,7 @@ const layoutLinks = links.concat(nearPairs);
 //   boundary a { b c }; d right a; d left c   (d after c AND before c).
 // Group/boundary rules are already expanded to node-level separations here, so
 // a plain cycle search over colaConstraints catches both forms.
-function findOrderingCycle(axis) {
+function findOrderingCycle(axis: string): number[] | null {
   const adj = new Map(); // left -> set of rights (left must precede right)
   for (const c of colaConstraints) {
     if (c.axis !== axis) continue;
@@ -434,8 +437,8 @@ function findOrderingCycle(axis) {
   }
   const state = new Map(); // 0=unvisited, 1=in-stack, 2=done
   const parent = new Map();
-  let cycle = null;
-  const visit = (u) => {
+  let cycle: number[] | null = null;
+  const visit = (u: number): boolean => {
     state.set(u, 1);
     for (const v of adj.get(u) || []) {
       if (state.get(v) === 1) {
@@ -487,10 +490,10 @@ const layout = new cola.Layout()
   // link lengths: those scale ideal length by neighbourhood difference, which
   // stretches edges around high-degree hubs and flings their neighbours away.
   // Labelled edges get a longer ideal length so their label has room to fit.
-  .linkDistance((l) => {
+  .linkDistance((l: any) => {
     if (l.label) {
       const lines = l.label.split("\n");
-      const w = Math.max(...lines.map((s) => textWidth(s)));
+      const w = Math.max(...lines.map((s: string) => textWidth(s)));
       // Multi-line labels also need vertical room, so a mostly-vertical edge is
       // long enough for a tall label chip (~16px per line plus padding).
       const h = lines.length * 16;
@@ -543,10 +546,10 @@ for (const n of nodes) {
 // contradictory layout is surfaced rather than silently skewed.
 for (const c of colaConstraints) {
   if (c.type !== "alignment") continue;
-  const coords = c.offsets.map((o) => nodes[o.node][c.axis]);
+  const coords = c.offsets.map((o: any) => nodes[o.node][c.axis]);
   const spread = Math.max(...coords) - Math.min(...coords);
   if (spread > 1) {
-    const ids = c.offsets.map((o) => nodes[o.node].id).join(", ");
+    const ids = c.offsets.map((o: any) => nodes[o.node].id).join(", ");
     console.warn(
       `[constraint] align ${c.axis} could not be satisfied ` +
         `(off by ${spread.toFixed(1)}px): ${ids}`,
@@ -555,11 +558,11 @@ for (const c of colaConstraints) {
 }
 
 // --- compute group membership ----------------------------------------------
-function descendantNodeIndices(gi, seen = new Set()) {
+function descendantNodeIndices(gi: number, seen = new Set<number>()): number[] {
   if (seen.has(gi)) return [];
   seen.add(gi);
   const g = groups[gi];
-  let idx = g.leaves.map((l) => (typeof l === "number" ? l : l.index));
+  let idx = g.leaves.map((l: any) => (typeof l === "number" ? l : l.index));
   for (const cg of g.groups) {
     const cgi = typeof cg === "number" ? cg : groups.indexOf(cg);
     idx = idx.concat(descendantNodeIndices(cgi, seen));
@@ -569,7 +572,7 @@ function descendantNodeIndices(gi, seen = new Set()) {
 const memberSets = groups.map((_, gi) => new Set(descendantNodeIndices(gi)));
 
 // render padding (for the drawn box); the solver padding above is larger.
-function renderRect(gi) {
+function renderRect(gi: number): any {
   const pad = paddingFor(boundaries[gi]);
   const band = boundaries[gi].draw === false ? 0 : LABEL_BAND;
   let mnX = Infinity,
@@ -655,10 +658,10 @@ const height = maxY - minY + MARGIN * 2 + TITLE_SPACE;
 const offsetX = -minX + MARGIN;
 const offsetY = -minY + MARGIN + TITLE_SPACE;
 
-function tx(x) {
+function tx(x: number): number {
   return x + offsetX;
 }
-function ty(y) {
+function ty(y: number): number {
   return y + offsetY;
 }
 
@@ -681,7 +684,13 @@ ctx.font = NODE_FONT;
 ctx.textAlign = "center";
 ctx.textBaseline = "middle";
 
-function roundRectPath(x, y, w, h, r) {
+function roundRectPath(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
   const rad = Math.max(0, Math.min(r, w / 2, h / 2));
   if (ctx.roundRect) {
     ctx.beginPath();
@@ -737,7 +746,7 @@ for (let d = 0; d <= maxDepth; d++) {
 
 // -- edge geometry helpers --
 // intersection of the segment (center -> toward) with the node's rectangle
-function boundaryPoint(node, towardX, towardY) {
+function boundaryPoint(node: any, towardX: number, towardY: number) {
   const cx = tx(node.x);
   const cy = ty(node.y);
   const dx = towardX - cx;
@@ -752,7 +761,7 @@ function boundaryPoint(node, towardX, towardY) {
   return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
-function drawArrowhead(x, y, angle) {
+function drawArrowhead(x: number, y: number, angle: number): void {
   const size = 10;
   ctx.save();
   ctx.translate(x, y);
@@ -768,7 +777,14 @@ function drawArrowhead(x, y, angle) {
 }
 
 // -- stickman rendering for `actor` shapes --
-function drawStickman(cx, cy, w, h, color, label) {
+function drawStickman(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  color: string,
+  label: string,
+): void {
   const labelH = 18;
   const figH = h - labelH;
   const topY = cy - h / 2;
@@ -809,7 +825,14 @@ function drawStickman(cx, cy, w, h, color, label) {
 }
 
 // -- 3D cylinder rendering for `database` shapes --
-function drawCylinder(cx, cy, w, h, style, label) {
+function drawCylinder(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  style: any,
+  label: string,
+): void {
   const rx = w / 2;
   const ry = Math.min(h * 0.16, rx * 0.45); // vertical radius of the lid/base
   const topY = cy - h / 2 + ry; // centre y of the top ellipse
@@ -853,10 +876,10 @@ function drawCylinder(cx, cy, w, h, style, label) {
 // -- edges (drawn under nodes; labels are collected and drawn last, on top) --
 // WebCola rewrites link.source/target from indices into node references during
 // start(); handle either form here.
-function resolveNode(ref) {
+function resolveNode(ref: any): any {
   return typeof ref === "number" ? nodes[ref] : ref;
 }
-const edgeLabels = [];
+const edgeLabels: any[] = [];
 for (const link of links) {
   const source = resolveNode(link.source);
   const target = resolveNode(link.target);
@@ -960,7 +983,7 @@ for (const n of nodes) {
 for (const lbl of edgeLabels) {
   const lines = lbl.text.split("\n");
   const lineH = 16;
-  const maxW = Math.max(...lines.map((l) => textWidth(l)));
+  const maxW = Math.max(...lines.map((l: string) => textWidth(l)));
   const totalH = lines.length * lineH;
   // Offset labels sit fully below the anchor so the chip never hides the line,
   // regardless of how many lines the label has.
@@ -969,7 +992,7 @@ for (const lbl of edgeLabels) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(lbl.x - maxW / 2 - 4, top - 2, maxW + 8, totalH + 4);
   ctx.fillStyle = "#222222";
-  lines.forEach((line, i) => {
+  lines.forEach((line: string, i: number) => {
     ctx.fillText(line, lbl.x, top + lineH / 2 + i * lineH);
   });
 }
@@ -981,7 +1004,7 @@ stream.pipe(out);
 out.on("finish", () =>
   console.log(`Wrote ${outputPath} (${canvas.width}x${canvas.height})`),
 );
-out.on("error", (err) => {
+out.on("error", (err: Error) => {
   console.error(`Failed to write ${outputPath}:`, err);
   process.exit(1);
 });

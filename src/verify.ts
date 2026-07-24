@@ -1,5 +1,5 @@
-// verify.js — programmatic checks on a layout dump produced via GRAPHGEN_DUMP.
-// Usage: node verify.js <dump.json> [rulesFile.txt-or-json]
+// verify.ts — programmatic checks on a layout dump produced via GRAPHGEN_DUMP.
+// Usage: tsx src/verify.ts <dump.json> [rulesFile.txt-or-json]
 //
 // Checks:
 //   1. all node positions are finite
@@ -15,13 +15,15 @@ const { parseGraphText, stripComments } = require("./parser");
 
 const dumpPath = process.argv[2];
 const rulesPath = process.argv[3];
-const dump = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+const dump: { nodes: any[]; groups: any[]; meta?: any } = JSON.parse(
+  fs.readFileSync(dumpPath, "utf8"),
+);
 
 const byId = Object.fromEntries(dump.nodes.map((n) => [n.id, n]));
 const groupById = Object.fromEntries(dump.groups.map((g) => [g.id, g]));
 
 let failures = 0;
-function check(ok, msg) {
+function check(ok: boolean, msg: string) {
   if (ok) {
     console.log(`  ok   ${msg}`);
   } else {
@@ -78,7 +80,7 @@ if (rulesPath) {
         .constraints || [];
   }
   // resolve a constraint id to a centre point: a node, or a boundary (group).
-  const center = (id) => {
+  const center = (id: string) => {
     const n = byId[id];
     if (n) return { id, x: n.x, y: n.y };
     const g = groupById[id];
@@ -153,7 +155,7 @@ for (const n of dump.nodes) {
 //    or via nesting) must sit fully outside that boundary's rect, never
 //    straddling its border.
 console.log("[boundary separation]");
-function belongsTo(node, boundaryId) {
+function belongsTo(node: any, boundaryId: string) {
   let cur = node.parent;
   while (cur) {
     if (cur === boundaryId) return true;

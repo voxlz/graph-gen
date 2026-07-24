@@ -1,14 +1,14 @@
-// generate.js
+// generate.ts
 // Render one or more graphs from explicit input/output path pairs.
 //
 // Usage:
-//   node generate.js <input1> <output1> [<input2> <output2> ...]
+//   tsx src/generate.ts <input1> <output1> [<input2> <output2> ...]
 //
 // Example:
-//   node generate.js demo/usecases/bookstore_uc1.txt out/bookstore_uc1.png \
+//   tsx src/generate.ts demo/usecases/bookstore_uc1.txt out/bookstore_uc1.png \
 //                     demo/scopes/weather_scope.txt  out/weather_scope.png
 //
-// Each pair is rendered by index.js. Missing input files or an odd number of
+// Each pair is rendered by index.ts. Missing input files or an odd number of
 // arguments are reported and cause a non-zero exit.
 
 const { execFileSync } = require("child_process");
@@ -19,12 +19,12 @@ const args = process.argv.slice(2);
 
 if (args.length === 0 || args.length % 2 !== 0) {
   console.error(
-    "Usage: node generate.js <input1> <output1> [<input2> <output2> ...]",
+    "Usage: tsx src/generate.ts <input1> <output1> [<input2> <output2> ...]",
   );
   process.exit(1);
 }
 
-const pairs = [];
+const pairs: Array<{ input: string; output: string }> = [];
 for (let i = 0; i < args.length; i += 2) {
   pairs.push({ input: args[i], output: args[i + 1] });
 }
@@ -39,12 +39,13 @@ for (const { input, output } of pairs) {
   const outDir = path.dirname(output);
   if (outDir && outDir !== ".") fs.mkdirSync(outDir, { recursive: true });
   try {
-    execFileSync("node", [path.join(__dirname, "index.js"), input, output], {
+    execFileSync("tsx", [path.join(__dirname, "index.ts"), input, output], {
       stdio: "inherit",
-      cwd: __dirname,
+      cwd: path.resolve(__dirname, ".."),
     });
   } catch (err) {
-    console.error(`[fail] ${input} -> ${output}: ${err.message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[fail] ${input} -> ${output}: ${message}`);
     failures++;
   }
 }

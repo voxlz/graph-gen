@@ -2,14 +2,23 @@
   "name": "graphgen",
   "version": "2.0.0",
   "description": "Constraint-based graph layout -> PNG renderer",
-  "main": "index.js",
+  "main": "src/index.ts",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js",
-    "generate": "node generate.js"
+    "start": "tsx src/index.ts",
+    "generate": "tsx src/generate.ts",
+    "render-all": "tsx src/render-all.ts",
+    "verify": "tsx src/verify.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "canvas": "^3.2.3",
+    "tsx": "^4.23.1",
     "webcola": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/webcola": "^3.1.27",
+    "typescript": "^7.0.2"
   }
 }

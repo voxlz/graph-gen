@@ -1,6 +1,6 @@
-// parser.js
+// parser.ts
 // Parses the graph DSL (*.txt) into the intermediate JSON representation
-// consumed by index.js. The intermediate shape mirrors parsedGraphExample.json:
+// consumed by index.ts. The intermediate shape mirrors parsedGraphExample.json:
 //
 //   {
 //     graph:       { title, minGap, lines },
@@ -19,7 +19,7 @@
 // --- comment stripping (string-aware) ---------------------------------------
 // Removes // line comments and /* */ block comments without touching text that
 // lives inside double-quoted strings.
-function stripComments(text) {
+function stripComments(text: string) {
   let out = "";
   let inString = false;
   let inLine = false;
@@ -69,7 +69,7 @@ function stripComments(text) {
 // --- balanced-brace block extraction ----------------------------------------
 // Given text and the index of an opening "{", returns { body, end } where body
 // is the text between the braces and end is the index just past the closing "}".
-function extractBlock(text, openIdx) {
+function extractBlock(text: string, openIdx: number) {
   let depth = 0;
   let inString = false;
   for (let i = openIdx; i < text.length; i++) {
@@ -91,7 +91,7 @@ function extractBlock(text, openIdx) {
 }
 
 // --- id slugification for label-only declarations ---------------------------
-function slug(label) {
+function slug(label: string) {
   const s = label
     .replace(/[^A-Za-z0-9]+/g, " ")
     .trim()
@@ -103,7 +103,7 @@ function slug(label) {
 
 // --- node/boundary header parsing -------------------------------------------
 // Accepts: `id`, `id: "label"`, `id: label`, `"label" as id`, `"label"`.
-function parseHeader(header) {
+function parseHeader(header: string) {
   const h = header.trim();
   let m;
   if ((m = h.match(/^"(.+)"\s+as\s+(\S+)$/))) return { id: m[2], label: m[1] };
@@ -119,7 +119,13 @@ function parseHeader(header) {
 }
 
 // --- nodes block (recursive, handles nested boundaries) ---------------------
-function parseNodesBlock(body, parent, nodes, boundaries, warnings) {
+function parseNodesBlock(
+  body: string,
+  parent: string | null,
+  nodes: any[],
+  boundaries: any[],
+  warnings: string[],
+) {
   let i = 0;
   while (i < body.length) {
     // find the next non-whitespace
@@ -187,7 +193,11 @@ function parseNodesBlock(body, parent, nodes, boundaries, warnings) {
 }
 
 // --- shapes block (style overrides expressed in the DSL) --------------------
-function parseShapesBlock(body, shapes, warnings) {
+function parseShapesBlock(
+  body: string,
+  shapes: Record<string, Record<string, string | number>>,
+  warnings: string[],
+) {
   let i = 0;
   while (i < body.length) {
     while (i < body.length && /\s/.test(body[i])) i++;
@@ -204,13 +214,13 @@ function parseShapesBlock(body, shapes, warnings) {
       continue;
     }
     const { body: inner, end } = extractBlock(body, j);
-    const style = {};
+    const style: Record<string, string | number> = {};
     for (const line of inner.split("\n")) {
       const t = line.trim();
       if (!t) continue;
       const m = t.match(/^(\w+)\s+"?([^"]*)"?$/);
       if (m) {
-        let val = m[2].trim();
+        let val: string | number = m[2].trim();
         if (/^-?\d+(\.\d+)?$/.test(val)) val = Number(val);
         style[m[1]] = val;
       } else {
@@ -223,7 +233,11 @@ function parseShapesBlock(body, shapes, warnings) {
 }
 
 // --- graph settings block (key value pairs) ---------------------------------
-function parseSettingsBlock(body, target, warnings) {
+function parseSettingsBlock(
+  body: string,
+  target: Record<string, string | number | null>,
+  warnings: string[],
+) {
   for (const raw of body.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
@@ -232,14 +246,14 @@ function parseSettingsBlock(body, target, warnings) {
       warnings.push(`Could not parse graph setting: "${line}"`);
       continue;
     }
-    let val = m[2].trim();
+    let val: string | number = m[2].trim();
     if (/^-?\d+(\.\d+)?$/.test(val)) val = Number(val);
     target[m[1]] = val;
   }
 }
 
 // --- edges block ------------------------------------------------------------
-function parseEdgesBlock(body, edges, warnings) {
+function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
   // Track edges by unordered node pair so a second edge between the same two
   // nodes is merged into the first (rather than silently overriding it):
   // arrows are combined (bidirectional if opposite) and labels are joined with
@@ -317,14 +331,18 @@ const DIRECTIONS = new Set([
   "below",
 ]);
 
-function normalizeDir(dir) {
+function normalizeDir(dir: string) {
   const d = dir.toLowerCase();
   if (d === "above") return "top";
   if (d === "below") return "bottom";
   return d;
 }
 
-function parseConstraintsBlock(body, constraints, warnings) {
+function parseConstraintsBlock(
+  body: string,
+  constraints: any[],
+  warnings: string[],
+) {
   for (const raw of body.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
@@ -336,7 +354,7 @@ function parseConstraintsBlock(body, constraints, warnings) {
     if (tokens[0].toLowerCase() === "align") {
       const mode = (tokens[1] || "").toLowerCase();
       const ids = tokens.slice(2);
-      let axis = null;
+      let axis: "x" | "y" | null = null;
       if (["row", "horizontal", "y"].includes(mode)) axis = "y";
       else if (["col", "column", "vertical", "x"].includes(mode)) axis = "x";
       if (!axis) {
@@ -366,11 +384,11 @@ function parseConstraintsBlock(body, constraints, warnings) {
 }
 
 // --- top-level parse --------------------------------------------------------
-function parseGraphText(text) {
+function parseGraphText(text: string) {
   const cleaned = stripComments(text);
-  const warnings = [];
+  const warnings: string[] = [];
 
-  const result = {
+  const result: any = {
     graph: { title: "", minGap: null, lines: "direct" },
     shapes: {},
     nodes: [],
