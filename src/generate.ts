@@ -11,9 +11,9 @@
 // Each pair is rendered by index.ts. Missing input files or an odd number of
 // arguments are reported and cause a non-zero exit.
 
-const { execFileSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const args = process.argv.slice(2);
 

@@ -9,6 +9,7 @@
     "generate": "tsx src/generate.ts",
     "render-all": "tsx src/render-all.ts",
     "verify": "tsx src/verify.ts",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +20,8 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/webcola": "^3.1.27",
-    "typescript": "^7.0.2"
+    "eslint": "^10.7.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
   }
 }

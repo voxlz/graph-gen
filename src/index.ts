@@ -12,11 +12,11 @@
 //  4. Run WebCola (headless, no DOM) to solve positions with overlap avoidance.
 //  5. Render the result with node-canvas -> PNG.
 
-const fs = require("fs");
-const path = require("path");
-const cola = require("webcola");
-const { createCanvas } = require("canvas");
-const { parseGraphText, stripComments } = require("./parser");
+import fs from "node:fs";
+import path from "node:path";
+import * as cola from "webcola";
+import { createCanvas } from "canvas";
+import { parseGraphText, stripComments } from "./parser";
 
 const inputPath = process.argv[2] || "graph.txt";
 const outputPath = process.argv[3] || "output.png";

@@ -9,9 +9,9 @@
 //
 // Exit code is non-zero if any check fails.
 
-const fs = require("fs");
-const path = require("path");
-const { parseGraphText, stripComments } = require("./parser");
+import fs from "node:fs";
+import path from "node:path";
+import { parseGraphText, stripComments } from "./parser";
 
 const dumpPath = process.argv[2];
 const rulesPath = process.argv[3];

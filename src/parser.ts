@@ -429,4 +429,4 @@ function parseGraphText(text: string) {
   return result;
 }
 
-module.exports = { parseGraphText, stripComments };
+export { parseGraphText, stripComments };

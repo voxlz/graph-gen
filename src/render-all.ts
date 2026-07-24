@@ -6,9 +6,9 @@
 //   example/parsedGraph...json-> renders/example/parsedGraphExample.png
 // Usage: tsx src/render-all.ts
 
-const { execFileSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "renders");
