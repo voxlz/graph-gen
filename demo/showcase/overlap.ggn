@@ -2,7 +2,7 @@ title "Overlap stress test"
 
 // A hub-and-spoke graph: every spoke links to the hub, so the solver naturally
 // wants to stack them on top of each other. avoidOverlaps must push them apart
-// WITHOUT violating the explicit right/below ordering rules below.
+// WITHOUT violating the explicit right/bottom ordering rules below.
 
 nodes {
     box hub: "Hub"
@@ -33,8 +33,8 @@ edges {
 constraints {
     n1 right hub
     n2 right n1
-    n3 below hub
-    n4 below n3
+    n3 bottom hub
+    n4 bottom n3
     wide right n6
-    tiny below wide
+    tiny bottom wide
 }

@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "generate": "tsx src/generate.ts",
     "render-all": "tsx src/render-all.ts",
+    "watch": "tsx src/watch.ts",
     "verify": "tsx src/verify.ts",
     "test": "jest",
     "lint": "eslint . --max-warnings 0",

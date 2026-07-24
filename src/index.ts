@@ -454,7 +454,7 @@ for (const rule of spec.constraints || []) {
       break;
     }
     default:
-      console.warn(`[constraint] unknown type: ${type}`);
+      break;
   }
 }
 

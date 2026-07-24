@@ -19,5 +19,5 @@ edges {
 
 constraints {
     compAb right compAe
-    compBy below compBx
+    compBy bottom compBx
 }

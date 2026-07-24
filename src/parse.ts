@@ -329,9 +329,6 @@ function parseEdgesBlock(body: string, edges: any[], warnings: string[]) {
           ? `${existing.label}\n${edge.label}`
           : edge.label;
       }
-      warnings.push(
-        `merged duplicate edge ${source} <-> ${target} (arrows + labels combined)`,
-      );
     } else {
       edges.push(edge);
       byPair.set(key, edge);

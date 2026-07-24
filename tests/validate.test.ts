@@ -47,7 +47,7 @@ describe("validateGraph", () => {
     );
   });
 
-  it("rejects the removed above and below constraint aliases", () => {
+  it("rejects removed above and below constraint aliases", () => {
     const { spec, errors } = parseGraphText(`
       nodes {
         box alpha

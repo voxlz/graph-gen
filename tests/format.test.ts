@@ -110,6 +110,24 @@ describe("formatGraphFile", () => {
     }
   });
 
+  it("does not rewrite already formatted graph files", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
+    const file = path.join(directory, "graph.ggn");
+    const formattedText = "nodes {\n    box customer\n}\n";
+    fs.writeFileSync(file, formattedText);
+    const writeFile = jest.spyOn(fs, "writeFileSync");
+
+    try {
+      const result = formatGraphFile(file);
+
+      expect(result.errors).toEqual([]);
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      writeFile.mockRestore();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not rewrite files with parse errors", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
     const file = path.join(directory, "graph.ggn");

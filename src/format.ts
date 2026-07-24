@@ -71,6 +71,8 @@ export function formatGraphText(text: string): FormatResult {
 export function formatGraphFile(file: string): FormatResult {
   const text = fs.readFileSync(file, "utf8");
   const result = formatGraphText(text);
-  if (result.errors.length === 0) fs.writeFileSync(file, result.formatted);
+  if (result.errors.length === 0 && result.formatted !== text) {
+    fs.writeFileSync(file, result.formatted);
+  }
   return result;
 }
