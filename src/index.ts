@@ -1,5 +1,5 @@
 // index.ts
-// Usage: tsx src/index.ts <input.ggn|input.json> <output.png> [style.jsonc]
+// Usage: tsx src/index.ts <input.ggn|input.json> [output.png] [style.jsonc]
 //
 // Pipeline:
 //  1. Format and load the graph spec. A .ggn input is normalized by format.ts
@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { formatGraphFile } from "./format";
+import { resolveOutputPath } from "./output";
 import {
   emptyGraphSpec,
   parseGraphText,
@@ -21,7 +22,7 @@ import { renderErrorGraph, renderGraph } from "./render";
 import { validateGraph, type DiagnosticLocation } from "./validate";
 
 const inputPath = process.argv[2] || "graph.ggn";
-const outputPath = process.argv[3] || "output.png";
+const cliOutputPath = process.argv[3];
 // Optional: a custom global style file (falls back to style.jsonc/style.json).
 const stylePath = process.argv[4];
 
@@ -30,6 +31,18 @@ function parseJsonc(text: string): any {
   const noComments = stripComments(text);
   const noTrailingCommas = noComments.replace(/,(\s*[}\]])/g, "$1");
   return JSON.parse(noTrailingCommas);
+}
+
+function loadGlobalStyle(): Record<string, any> {
+  if (stylePath) {
+    if (!fs.existsSync(stylePath)) return {};
+    return parseJsonc(fs.readFileSync(stylePath, "utf8"));
+  }
+  for (const name of ["style.jsonc", "style.json"]) {
+    const file = path.join(__dirname, "..", name);
+    if (fs.existsSync(file)) return parseJsonc(fs.readFileSync(file, "utf8"));
+  }
+  return {};
 }
 
 function setSourceFile(spec: GraphSpec, file: string) {
@@ -203,6 +216,13 @@ function formatParseDiagnostic(error: string) {
 }
 
 const loaded = loadSpec(inputPath);
+const globalStyle = loadGlobalStyle();
+const outputPath = resolveOutputPath(
+  inputPath,
+  cliOutputPath,
+  loaded.spec.graph.outputPath ?? globalStyle.graph?.outputPath,
+);
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 if (loaded.errors.length > 0) {
   const errors = loaded.errors.map(formatParseDiagnostic);
   for (const error of errors) console.error(error);

@@ -1,6 +1,7 @@
 {
   "graph": {
     "title": "",
+    "outputPath": "../graphs/{file}", // output path template; {file} expands to the input basename as .png
     "minGap": 100,
     "nodeGap": 100,
     "lineColor": "#000000", // default edge / arrow color

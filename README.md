@@ -86,6 +86,12 @@ docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.gg
 The image appears at `./out/output.png` on your machine. Swap in your own `.ggn`
 input path and output name as needed.
 
+The output argument is optional. A graph can instead define `outputPath` in its
+`graph` block, for example `outputPath "../graphs/{file}"`. `{file}` expands to
+the input filename with a `.png` extension, and configured relative paths are
+resolved from the input graph's directory. An explicit CLI output path takes
+precedence. The default style writes to `../graphs/{file}`.
+
 To override the styles, mount your own style file and pass it as the third
 argument (same as the local run):
 
