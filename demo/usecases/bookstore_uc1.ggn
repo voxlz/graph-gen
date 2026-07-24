@@ -2,10 +2,6 @@ import "../scopes/bookstore_scope.ggn"
 
 title "Bookstore - UC1 - Browse and place an order"
 
-graph {
-    nodeGap 150
-}
-
 edges {
     customer --> gateway: "GET /books {query}"
     gateway --> catalog: "search {query}"

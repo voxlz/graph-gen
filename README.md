@@ -215,9 +215,14 @@ styles; only the file being rendered contributes edges.
   engine. Override it with `GRAPHGEN_LAYOUT`.
 - `graph.layoutIterations` — maximum custom-solver iterations, default `1000`.
   Override it with `GRAPHGEN_LAYOUT_ITERS`.
-- `graph.minimize` — post-layout generations that move nodes toward the center
-  on each axis while preserving every hard constraint. It defaults to `100`; set
-  it to `0` to disable compaction. Override it with `GRAPHGEN_MINIMIZE`.
+- `graph.minimize` — post-layout generations that first move nodes toward the
+  center, then shorten edges, escape blocked local minima, and swap nodes in the
+  same container when that reduces total edge length. A fourth stage relocates
+  edge-free perimeter nodes around nearby components to reduce rendered area.
+  Those four stages repeat until rendered area no longer improves. Every step
+  preserves all hard constraints, and edge shortening may grow the rendered
+  area by at most 5% within a cycle. It defaults to `100`; set it to `0` to
+  disable compaction. Override it with `GRAPHGEN_MINIMIZE`.
 - `graph.debugFrameEvery` — write a solver progress PNG every N iterations. It
   defaults to `0` (disabled); set it to `5`, for example, to write frames beside
   the output in `<output-name>.frames/`. Override it with

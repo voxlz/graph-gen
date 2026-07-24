@@ -2,10 +2,6 @@ import "../scopes/bookstore_scope.ggn"
 
 title "Bookstore - UC2 - Track a shipment"
 
-graph {
-    nodeGap 150
-}
-
 edges {
     customer --> gateway: "GET /orders/{id}/tracking {cookie:auth}"
     gateway --> orders: "get order {id}"

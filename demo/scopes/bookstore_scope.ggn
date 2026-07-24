@@ -35,27 +35,3 @@ edges {
     orders --- email
     orders --- shipping
 }
-
-constraints {
-    // groups side by side
-    external right docker
-
-    // services stacked
-    gateway top catalog
-    catalog top orders
-
-    // stores to the right of the gateway
-    postgres right gateway
-    cache bottom postgres
-
-    // external providers as a column
-    payments top email
-    email top shipping
-
-    // client and attacker to the left
-    customer left gateway
-    attacker left customer
-
-    // compromised container sits below the order service
-    rogue bottom orders
-}

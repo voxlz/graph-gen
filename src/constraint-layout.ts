@@ -1,3 +1,9 @@
+import {
+  minimizeCompoundLayout,
+  type CompactLayoutMeasure,
+  type CompactObstacle,
+} from "./compound-minimize";
+
 export interface LayoutNode {
   id: string;
   x: number;
@@ -1270,6 +1276,95 @@ function minimizeLayout(ctx: LayoutContext, generations: number): void {
   }
 }
 
+function measureCompactLayout(ctx: LayoutContext): CompactLayoutMeasure | null {
+  const check = collectViolations(ctx);
+  if (check.messages.length > 0) return null;
+  const groupRects = allGroupRects(ctx);
+  const rects = [
+    ...ctx.nodes.map((node) => nodeRect(node)),
+    ...ctx.boundaries.flatMap((boundary) => {
+      if (boundary.draw === false) return [];
+      const rect = groupRects.get(boundary.id);
+      return rect ? [rect] : [];
+    }),
+    ...check.placements.map((placement) => placement.rect),
+  ];
+  const edgeLength = ctx.edges.reduce((total, edge) => {
+    const segment = edgeSegment(edge, ctx);
+    return total + Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1);
+  }, 0);
+  return { rects, edgeLength };
+}
+
+function compactObstacles(ctx: LayoutContext): CompactObstacle[] {
+  const groupRects = allGroupRects(ctx);
+  return [
+    ...ctx.nodes.map((node) => ({
+      id: node.id,
+      kind: "node" as const,
+      rect: nodeRect(node),
+      node,
+    })),
+    ...ctx.boundaries.flatMap((boundary) => {
+      const rect = groupRects.get(boundary.id);
+      return rect ? [{ id: boundary.id, kind: "boundary" as const, rect }] : [];
+    }),
+  ];
+}
+
+function compactMeasureArea(measure: CompactLayoutMeasure): number {
+  if (measure.rects.length === 0) return 0;
+  const bounds = measure.rects.reduce<LayoutRect>(
+    (result, rect) => ({
+      minX: Math.min(result.minX, rect.minX),
+      maxX: Math.max(result.maxX, rect.maxX),
+      minY: Math.min(result.minY, rect.minY),
+      maxY: Math.max(result.maxY, rect.maxY),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
+  return (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+}
+
+function minimizeUntilSizeStable(
+  ctx: LayoutContext,
+  generations: number,
+): void {
+  const edges = ctx.edges.map((edge) => {
+    const [source, target] = edgeNodeIndices(edge, ctx);
+    return { source: ctx.nodes[source], target: ctx.nodes[target] };
+  });
+  for (let cycle = 0; cycle < generations; cycle++) {
+    const baselineMeasure = measureCompactLayout(ctx);
+    if (!baselineMeasure) return;
+    const baselineArea = compactMeasureArea(baselineMeasure);
+    const baselinePositions = ctx.nodes.map(({ x, y }) => ({ x, y }));
+
+    minimizeLayout(ctx, generations);
+    minimizeCompoundLayout({
+      nodes: ctx.nodes,
+      edges,
+      nodeGap: ctx.options.nodeGap,
+      generations,
+      obstacles: () => compactObstacles(ctx),
+      measure: () => measureCompactLayout(ctx),
+      relax: () => minimizeLayout(ctx, Math.min(10, generations)),
+    });
+
+    const candidateMeasure = measureCompactLayout(ctx);
+    const candidateArea = candidateMeasure
+      ? compactMeasureArea(candidateMeasure)
+      : Infinity;
+    const scale = Math.max(1, baselineArea, candidateArea);
+    if (candidateArea < baselineArea - scale * 1e-9) continue;
+    ctx.nodes.forEach((node, index) => {
+      node.x = baselinePositions[index].x;
+      node.y = baselinePositions[index].y;
+    });
+    break;
+  }
+}
+
 export function solveConstraintLayout(
   nodes: LayoutNode[],
   boundaries: LayoutBoundary[],
@@ -1318,7 +1413,7 @@ export function solveConstraintLayout(
       0,
       Math.floor(options.minimizeIterations ?? 100),
     );
-    minimizeLayout(ctx, minimizeIterations);
+    minimizeUntilSizeStable(ctx, minimizeIterations);
     check = collectViolations(ctx);
   }
   if (every > 0) {
