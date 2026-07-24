@@ -9,8 +9,11 @@
     "generate": "tsx src/generate.ts",
     "render-all": "tsx src/render-all.ts",
     "verify": "tsx src/verify.ts",
-    "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "prepare": "husky"
   },
   "dependencies": {
     "canvas": "^3.2.3",
@@ -21,6 +24,8 @@
     "@types/node": "^26.1.1",
     "@types/webcola": "^3.1.27",
     "eslint": "^10.7.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0"
   }
