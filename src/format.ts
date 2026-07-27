@@ -36,6 +36,74 @@ function leadingClosingBraces(line: string): number {
   return count;
 }
 
+function normalizeLineSpacing(line: string): string {
+  let normalized = "";
+  let inString = false;
+  let pendingSpace = false;
+
+  for (let index = 0; index < line.length; index++) {
+    const character = line[index];
+    const next = line[index + 1];
+    if (inString) {
+      normalized += character;
+      if (character === '"' && line[index - 1] !== "\\") inString = false;
+      continue;
+    }
+    if (character === '"') {
+      if (
+        normalized &&
+        (pendingSpace || normalized.endsWith(":")) &&
+        !normalized.endsWith(" ")
+      ) {
+        normalized += " ";
+      }
+      normalized += character;
+      pendingSpace = false;
+      inString = true;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      if (normalized && pendingSpace) normalized += " ";
+      normalized += line.slice(index);
+      break;
+    }
+    if (/\s/.test(character)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (character === ":") {
+      normalized = normalized.trimEnd();
+      normalized += character;
+      pendingSpace = false;
+      continue;
+    }
+    if (character === "{") {
+      normalized = normalized.trimEnd();
+      if (normalized) normalized += " ";
+      normalized += character;
+      pendingSpace = false;
+      continue;
+    }
+    if (character === "}") {
+      normalized = normalized.trimEnd();
+      normalized += character;
+      pendingSpace = false;
+      continue;
+    }
+    if (
+      normalized &&
+      (pendingSpace || normalized.endsWith(":")) &&
+      !normalized.endsWith(" ")
+    ) {
+      normalized += " ";
+    }
+    normalized += character;
+    pendingSpace = false;
+  }
+
+  return normalized;
+}
+
 export function formatGraphText(text: string): FormatResult {
   const parsed = parseGraphText(text);
   if (parsed.errors.length > 0) {
@@ -46,7 +114,7 @@ export function formatGraphText(text: string): FormatResult {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const formatted: string[] = [];
   for (const [index, rawLine] of lines.entries()) {
-    const line = rawLine.trim();
+    const line = normalizeLineSpacing(rawLine.trim());
     if (!line) {
       const next = lines
         .slice(index + 1)

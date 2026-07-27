@@ -35,6 +35,17 @@ box catalog
     expect(result.formatted).toBe('nodes {\n    box message: "{ hello }"\n}\n');
   });
 
+  it("normalizes declaration spacing outside quoted labels", () => {
+    const result = formatGraphText(`nodes {
+database     postgres:       "PostgreSQL   primary"
+}`);
+
+    expect(result.errors).toEqual([]);
+    expect(result.formatted).toBe(
+      'nodes {\n    database postgres: "PostgreSQL   primary"\n}\n',
+    );
+  });
+
   it("collapses repeated blank lines in imported graph files", () => {
     const result = formatGraphText(`
 import "../scopes/bookstore_scope.ggn"
