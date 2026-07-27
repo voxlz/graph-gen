@@ -6,6 +6,7 @@ import { minimizeTowardCenter } from "../../src/strategies/center";
 import { minimizeDisconnectedPerimeter } from "../../src/strategies/disconnected-perimeter";
 import { minimizeEdgeLengths } from "../../src/strategies/edge-shortening";
 import { minimizeNodeSwaps } from "../../src/strategies/node-swap";
+import { minimizeSharedNeighborSpread } from "../../src/strategies/shared-neighbor-spread";
 import {
   compactness,
   measureBounds,
@@ -27,6 +28,7 @@ const STRATEGIES = [
   "center",
   "edge-shortening",
   "blocker-escape",
+  "shared-neighbor-spread",
   "node-swap",
   "disconnected-perimeter",
 ] as const;
@@ -211,6 +213,8 @@ function runStrategy(name: (typeof STRATEGIES)[number]): void {
     minimizeEdgeLengths(strategyCase.options, baseline.area * 1.05);
   } else if (name === "blocker-escape") {
     minimizeBlockerEscapes(strategyCase.options, baseline.area * 1.05);
+  } else if (name === "shared-neighbor-spread") {
+    minimizeSharedNeighborSpread(strategyCase.options, baseline.area * 1.05);
   } else if (name === "node-swap") {
     minimizeNodeSwaps(strategyCase.options, baseline.area * 1.05);
   } else {

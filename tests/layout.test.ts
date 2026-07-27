@@ -269,6 +269,122 @@ describe("solveLayout", () => {
     expect(result.violations).toEqual([]);
   });
 
+  it("solves the ASRV scope topology without node-edge intersections", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "scopes", "asrv_scope.ggn"),
+      "utf8",
+    );
+    const parsed = parseGraphText(source);
+    expect(parsed.errors).toEqual([]);
+    const nodes = parsed.spec.nodes.map(bookstoreNode);
+    const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+    const edges = parsed.spec.edges.map((edge) => ({
+      source: indexById.get(edge.source) as number,
+      target: indexById.get(edge.target) as number,
+      label: edge.label,
+      labelWidth: edge.label ? textWidth(edge.label) : 0,
+      labelHeight: edge.label ? 16 : 0,
+    }));
+
+    const result = solveLayout(
+      nodes,
+      parsed.spec.boundaries,
+      edges,
+      parsed.spec.constraints,
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        boundaryPad: 20,
+        labelBand: 20,
+        nestPad: 36,
+        iterations: 1000,
+        minimizeIterations: 0,
+      },
+    );
+
+    expect(result.violations).toEqual([]);
+  });
+
+  it("keeps the SRV client outside its nested network boundaries", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "scopes", "srv_scope.ggn"),
+      "utf8",
+    );
+    const parsed = parseGraphText(source);
+    expect(parsed.errors).toEqual([]);
+    const nodes = parsed.spec.nodes.map(bookstoreNode);
+    const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+    const edges = parsed.spec.edges.map((edge) => ({
+      source: indexById.get(edge.source) as number,
+      target: indexById.get(edge.target) as number,
+      label: edge.label,
+      labelWidth: edge.label ? textWidth(edge.label) : 0,
+      labelHeight: edge.label ? 16 : 0,
+    }));
+
+    const result = solveLayout(
+      nodes,
+      parsed.spec.boundaries,
+      edges,
+      parsed.spec.constraints,
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        boundaryPad: 20,
+        labelBand: 20,
+        nestPad: 36,
+        iterations: 1000,
+        minimizeIterations: 0,
+      },
+    );
+
+    expect(result.violations).toEqual([]);
+  });
+
+  it("minimizes shared-hub edge length in the compass topology", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "demo", "showcase", "compass.ggn"),
+      "utf8",
+    );
+    const parsed = parseGraphText(source);
+    expect(parsed.errors).toEqual([]);
+    const nodes = parsed.spec.nodes.map(bookstoreNode);
+    const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+    const edges = parsed.spec.edges.map((edge) => ({
+      source: indexById.get(edge.source) as number,
+      target: indexById.get(edge.target) as number,
+    }));
+
+    const result = solveLayout(
+      nodes,
+      parsed.spec.boundaries,
+      edges,
+      parsed.spec.constraints,
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        boundaryPad: 20,
+        labelBand: 20,
+        nestPad: 36,
+        iterations: 1000,
+        minimizeIterations: 100,
+      },
+    );
+
+    expect(result.violations).toEqual([]);
+    const center = nodes[indexById.get("center") as number];
+    const distances = ["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((id) => {
+      const spoke = nodes[indexById.get(id) as number];
+      return Math.hypot(spoke.x - center.x, spoke.y - center.y);
+    });
+    expect(distances.reduce((sum, distance) => sum + distance, 0)).toBeLessThan(
+      2000,
+    );
+  });
+
   it("solves bookstore UC2 with merged multiline edge labels", () => {
     const scope = parseGraphText(
       fs.readFileSync(

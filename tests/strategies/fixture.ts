@@ -7,6 +7,7 @@ import {
   rectanglesOverlap,
 } from "../../src/strategies/shared";
 import type {
+  MinimizeDirection,
   MinimizeMeasure,
   MinimizeOptions,
   MinimizeRect,
@@ -16,10 +17,12 @@ import type {
 export interface StrategyFixture {
   name: string;
   nodeGap: number;
+  directionalGap?: number;
   generations: number;
   viewport: MinimizeRect;
   nodes: LayoutNode[];
   edges: Array<[string, string]>;
+  directions?: MinimizeDirection[];
   boundaries: Array<MinimizeRect & { id: string }>;
 }
 
@@ -29,7 +32,7 @@ export interface StrategyCase {
   frames: StrategyFrame[];
 }
 
-export function loadFixture(name: string): StrategyFixture {
+function loadFixture(name: string): StrategyFixture {
   const path = join(__dirname, "cases", `${name}.json`);
   return JSON.parse(readFileSync(path, "utf8")) as StrategyFixture;
 }
@@ -149,6 +152,26 @@ function valid(fixture: StrategyFixture, nodes: LayoutNode[]): boolean {
   }
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const directionalGap = fixture.directionalGap ?? fixture.nodeGap;
+  for (const direction of fixture.directions ?? []) {
+    const a = nodeById.get(direction.a);
+    const b = nodeById.get(direction.b);
+    if (!a || !b) return false;
+    const aRect = nodeRect(a);
+    const bRect = nodeRect(b);
+    if (
+      (["left", "topleft", "bottomleft"].includes(direction.type) &&
+        aRect.maxX + directionalGap > bRect.minX + 0.01) ||
+      (["right", "topright", "bottomright"].includes(direction.type) &&
+        bRect.maxX + directionalGap > aRect.minX + 0.01) ||
+      (["top", "topleft", "topright"].includes(direction.type) &&
+        aRect.maxY + directionalGap > bRect.minY + 0.01) ||
+      (["bottom", "bottomleft", "bottomright"].includes(direction.type) &&
+        bRect.maxY + directionalGap > aRect.minY + 0.01)
+    ) {
+      return false;
+    }
+  }
   const edges = fixture.edges.map(([sourceId, targetId]) => ({
     source: nodeById.get(sourceId)!,
     target: nodeById.get(targetId)!,
@@ -226,6 +249,8 @@ export function createStrategyCase(name: string): StrategyCase {
       nodes,
       edges,
       nodeGap: fixture.nodeGap,
+      directionalGap: fixture.directionalGap ?? fixture.nodeGap,
+      directions: fixture.directions,
       generations: fixture.generations,
       obstacles: () => [
         ...nodes.map((node) => ({

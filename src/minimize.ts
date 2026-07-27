@@ -3,6 +3,7 @@ import { minimizeTowardCenter } from "./strategies/center";
 import { minimizeDisconnectedPerimeter } from "./strategies/disconnected-perimeter";
 import { minimizeEdgeLengths } from "./strategies/edge-shortening";
 import { minimizeNodeSwaps } from "./strategies/node-swap";
+import { minimizeSharedNeighborSpread } from "./strategies/shared-neighbor-spread";
 import {
   compactness,
   compareByKeys,
@@ -39,6 +40,7 @@ export function minimizeLayout(options: MinimizeOptions): void {
     minimizeEdgeLengths(cycleOptions, maximumArea);
     minimizeBlockerEscapes(cycleOptions, maximumArea);
     minimizeNodeSwaps(cycleOptions, maximumArea);
+    minimizeSharedNeighborSpread(cycleOptions, maximumArea);
     minimizeDisconnectedPerimeter(cycleOptions, maximumArea);
 
     const candidateMeasure = options.measure();
@@ -59,6 +61,13 @@ export function minimizeLayout(options: MinimizeOptions): void {
     }
     restore(options.nodes, baselinePositions);
     break;
+  }
+  const finalMeasure = options.measure();
+  if (finalMeasure) {
+    minimizeSharedNeighborSpread(
+      options,
+      compactness(finalMeasure).area * 1.05,
+    );
   }
   options.measure();
 }

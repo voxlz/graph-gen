@@ -629,25 +629,42 @@ function resolveBoundaryOverlaps(ctx: LayoutContext) {
       if (belongsTo(ctx, index, boundary.id)) continue;
       const rect = nodeRect(ctx.nodes[index], ctx.options.nodeGap / 2);
       if (!rectanglesOverlap(boundaryRect, rect)) continue;
-      const overlapX =
-        Math.min(boundaryRect.maxX, rect.maxX) -
-        Math.max(boundaryRect.minX, rect.minX);
-      const overlapY =
-        Math.min(boundaryRect.maxY, rect.maxY) -
-        Math.max(boundaryRect.minY, rect.minY);
       const entity = movableNodeEntity(
         ctx,
         index,
         new Set([boundary.id, ...boundaryAncestors(ctx, boundary.id)]),
       );
-      const bc = rectCenter(boundaryRect);
-      if (overlapX <= overlapY) {
-        const direction = ctx.nodes[index].x >= bc.x ? 1 : -1;
-        translateEntity(ctx, entity, direction * (overlapX + EPSILON), 0);
-      } else {
-        const direction = ctx.nodes[index].y >= bc.y ? 1 : -1;
-        translateEntity(ctx, entity, 0, direction * (overlapY + EPSILON));
-      }
+      chooseBestMove(
+        ctx,
+        [
+          {
+            entity,
+            dx: boundaryRect.minX - rect.maxX - EPSILON,
+            dy: 0,
+          },
+          {
+            entity,
+            dx: boundaryRect.maxX - rect.minX + EPSILON,
+            dy: 0,
+          },
+          {
+            entity,
+            dx: 0,
+            dy: boundaryRect.minY - rect.maxY - EPSILON,
+          },
+          {
+            entity,
+            dx: 0,
+            dy: boundaryRect.maxY - rect.minY + EPSILON,
+          },
+        ],
+        () =>
+          !rectanglesOverlap(
+            boundaryRect,
+            nodeRect(ctx.nodes[index], ctx.options.nodeGap / 2),
+          ),
+      );
+      rects = allGroupRects(ctx);
     }
   }
 }
@@ -770,37 +787,41 @@ function resolveNodeEdgeIntersections(ctx: LayoutContext) {
           : Math.sign(distance);
       const endpointMovement =
         Math.max(node.width, node.height) + ctx.options.nodeGap;
-      chooseBestMove(ctx, [
-        {
-          entity: node.id,
-          dx: normal.x * preferredDirection * movement,
-          dy: normal.y * preferredDirection * movement,
-        },
-        {
-          entity: node.id,
-          dx: -normal.x * preferredDirection * movement,
-          dy: -normal.y * preferredDirection * movement,
-        },
-        ...[-1, 1].flatMap((direction) => [
+      chooseBestMove(
+        ctx,
+        [
           {
             entity: node.id,
-            dx: direction * endpointMovement,
-            dy: 0,
+            dx: normal.x * preferredDirection * movement,
+            dy: normal.y * preferredDirection * movement,
           },
           {
             entity: node.id,
-            dx: 0,
-            dy: direction * endpointMovement,
+            dx: -normal.x * preferredDirection * movement,
+            dy: -normal.y * preferredDirection * movement,
           },
-        ]),
-        ...[source, target].flatMap((endpoint) =>
-          [-1, 1].map((direction) => ({
-            entity: ctx.nodes[endpoint].id,
-            dx: normal.x * direction * endpointMovement,
-            dy: normal.y * direction * endpointMovement,
-          })),
-        ),
-      ]);
+          ...[-1, 1].flatMap((direction) => [
+            {
+              entity: node.id,
+              dx: direction * endpointMovement,
+              dy: 0,
+            },
+            {
+              entity: node.id,
+              dx: 0,
+              dy: direction * endpointMovement,
+            },
+          ]),
+          ...[source, target].flatMap((endpoint) =>
+            [-1, 1].map((direction) => ({
+              entity: ctx.nodes[endpoint].id,
+              dx: normal.x * direction * endpointMovement,
+              dy: normal.y * direction * endpointMovement,
+            })),
+          ),
+        ],
+        () => !segmentIntersectsRect(edgeSegment(edge, ctx), nodeRect(node, 2)),
+      );
     }
   }
 }
@@ -1309,6 +1330,12 @@ export function solveLayout(
         return { source: ctx.nodes[source], target: ctx.nodes[target] };
       }),
       nodeGap: ctx.options.nodeGap,
+      directionalGap: Math.max(ctx.options.minGap, ctx.options.nodeGap),
+      directions: ctx.constraints.flatMap((constraint) => {
+        const a = constraint.a ?? constraint.left ?? constraint.top;
+        const b = constraint.b ?? constraint.right ?? constraint.bottom;
+        return a && b ? [{ type: constraint.type, a, b }] : [];
+      }),
       generations: minimizeIterations,
       obstacles: () => minimizationObstacles(ctx),
       isValid: (includeLabels) =>

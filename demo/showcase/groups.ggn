@@ -26,6 +26,6 @@ edges {
 }
 
 constraints {
-    groupA top groupB   // the whole of Group A sits left of the whole of Group B
-    lone top groupA      // a node placed above an entire group
+    groupA top groupB // the whole of Group A sits left of the whole of Group B
+    lone top groupA // a node placed above an entire group
 }

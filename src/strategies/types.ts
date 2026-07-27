@@ -24,6 +24,12 @@ export interface MinimizeEdge {
   target: LayoutNode;
 }
 
+export interface MinimizeDirection {
+  type: string;
+  a: string;
+  b: string;
+}
+
 export interface StrategyFrame {
   strategy: string;
   iteration: number;
@@ -34,6 +40,8 @@ export interface MinimizeOptions {
   nodes: LayoutNode[];
   edges: MinimizeEdge[];
   nodeGap: number;
+  directionalGap?: number;
+  directions?: MinimizeDirection[];
   generations: number;
   obstacles: () => MinimizeObstacle[];
   isValid: (includeLabels: boolean) => boolean;

@@ -209,7 +209,8 @@ after finding a valid layout.
 `src/minimize.ts` runs the fixed-point minimization cycle and rolls back a cycle
 that does not improve the result. The implementations live in
 `src/strategies/`: center compaction, edge shortening, blocker escape,
-same-container swaps, and disconnected-node perimeter relocation.
+same-container swaps, equal-radius spreading for blocked neighbors of a shared
+hub, and disconnected-node perimeter relocation.
 Candidate moves are accepted only through the layout solver's validation and
 measurement callbacks, so minimization cannot weaken or bypass layout
 requirements.
@@ -253,13 +254,15 @@ debug frames controlled by `graph.debugFrameEvery`.
   Override it with `GRAPHGEN_LAYOUT_ITERS`.
 - `graph.minimize` — post-layout generations that first move nodes toward the
   center, then shorten edges, escape blocked local minima, and swap nodes in the
-  same container when that reduces total edge length. A fifth stage relocates
-  edge-free perimeter nodes around nearby components to reduce rendered area.
-  Those five stages repeat until rendered size no longer improves; an equal-size
-  result may also be retained when it shortens total edge length. Every step
-  preserves all hard constraints, and edge shortening may grow the rendered
-  area by at most 5% within a cycle. It defaults to `100`; set it to `0` to
-  disable compaction. Override it with `GRAPHGEN_MINIMIZE`.
+  same container when that reduces total edge length. A fifth stage spreads
+  blocked neighbors of a shared hub to an equal radius with minimum node-gap
+  separation, and a sixth relocates edge-free perimeter nodes around nearby
+  components to reduce rendered area. Those six stages repeat until rendered
+  size no longer improves; an equal-size result may also be retained when it
+  shortens total edge length. Every step preserves all hard constraints, and
+  edge shortening may grow the rendered area by at most 5% within a cycle. It
+  defaults to `100`; set it to `0` to disable compaction. Override it with
+  `GRAPHGEN_MINIMIZE`.
 - `graph.debugFrameEvery` — write a solver progress PNG every N iterations. It
   defaults to `0` (disabled); set it to `5`, for example, to write frames beside
   the output in `<output-name>.frames/`. Override it with
