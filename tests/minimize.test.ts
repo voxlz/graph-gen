@@ -15,3 +15,16 @@ test("minimizeLayout keeps valid improvements from its strategy cycle", () => {
   expect(after.edgeLength).toBeLessThan(before.edgeLength);
   expect(strategyCase.frames.length).toBeGreaterThan(0);
 });
+
+test("minimizeLayout does no work when the generation limit is zero", () => {
+  const strategyCase = createStrategyCase("shared-neighbor-spread");
+  const before = strategyCase.options.nodes.map(({ x, y }) => ({ x, y }));
+  strategyCase.options.generations = 0;
+
+  minimizeLayout(strategyCase.options);
+
+  expect(strategyCase.options.nodes.map(({ x, y }) => ({ x, y }))).toEqual(
+    before,
+  );
+  expect(strategyCase.frames).toEqual([]);
+});

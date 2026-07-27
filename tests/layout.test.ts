@@ -291,7 +291,13 @@ constraints {
       parsed.spec.boundaries,
       edges,
       parsed.spec.constraints,
-      { ...options, minGap: 100, nodeGap: 100, iterations: 1000 },
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        iterations: 1000,
+        minimizeIterations: 0,
+      },
     );
 
     expect(result.violations).toEqual([]);
@@ -454,6 +460,7 @@ constraints {
         labelBand: 20,
         nestPad: 36,
         iterations: 1000,
+        minimizeIterations: 0,
       },
     );
 
@@ -501,6 +508,7 @@ constraints {
         labelBand: 20,
         nestPad: 36,
         iterations: 1000,
+        minimizeIterations: 0,
       },
     );
 

@@ -62,12 +62,5 @@ export function minimizeLayout(options: MinimizeOptions): void {
     restore(options.nodes, baselinePositions);
     break;
   }
-  const finalMeasure = options.measure();
-  if (finalMeasure) {
-    minimizeSharedNeighborSpread(
-      options,
-      compactness(finalMeasure).area * 1.05,
-    );
-  }
   options.measure();
 }

@@ -1215,7 +1215,8 @@ function collectViolations(
     }
   }
 
-  const placements = includeLabels ? placeLabels(ctx) : [];
+  const placements =
+    includeLabels && messages.length === 0 ? placeLabels(ctx) : [];
   if (includeLabels) {
     for (const placement of placements) {
       if (placement.hardCollisions > 0) {
