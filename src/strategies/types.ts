@@ -43,6 +43,10 @@ export interface MinimizeOptions {
   directionalGap?: number;
   directions?: MinimizeDirection[];
   generations: number;
+  setNodeAxis?: (node: LayoutNode, axis: "x" | "y", value: number) => void;
+  containerIds?: string[];
+  containerRect?: (id: string) => MinimizeRect | null;
+  setContainerAxis?: (id: string, axis: "x" | "y", value: number) => void;
   obstacles: () => MinimizeObstacle[];
   isValid: (includeLabels: boolean) => boolean;
   measure: () => MinimizeMeasure | null;

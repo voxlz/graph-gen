@@ -334,19 +334,7 @@ function isAncestor(ctx: LayoutContext, ancestor: string, child: string) {
 function entityRect(ctx: LayoutContext, id: string): LayoutRect | null {
   const node = ctx.nodeById.get(id);
   if (node) return nodeRect(node);
-  const members = ctx.members.get(id);
-  if (!members?.length) return null;
-  return members.reduce<LayoutRect>(
-    (result, index) => {
-      const rect = nodeRect(ctx.nodes[index]);
-      result.minX = Math.min(result.minX, rect.minX);
-      result.maxX = Math.max(result.maxX, rect.maxX);
-      result.minY = Math.min(result.minY, rect.minY);
-      result.maxY = Math.max(result.maxY, rect.maxY);
-      return result;
-    },
-    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-  );
+  return rectFromMembers(ctx, id);
 }
 
 function translateEntity(
@@ -536,23 +524,46 @@ function resolveDirectionalConstraints(ctx: LayoutContext) {
       Math.max(ctx.options.minGap, ctx.options.nodeGap),
     );
     if (correction.dx || correction.dy) {
-      chooseBestMove(ctx, [
-        {
-          entities: directionalClosure(ctx, aId, correction.dx, correction.dy),
-          dx: correction.dx,
-          dy: correction.dy,
+      chooseBestMove(
+        ctx,
+        [
+          {
+            entities: directionalClosure(
+              ctx,
+              aId,
+              correction.dx,
+              correction.dy,
+            ),
+            dx: correction.dx,
+            dy: correction.dy,
+          },
+          {
+            entities: directionalClosure(
+              ctx,
+              bId,
+              -correction.dx,
+              -correction.dy,
+            ),
+            dx: -correction.dx,
+            dy: -correction.dy,
+          },
+        ],
+        () => {
+          const movedA = entityRect(ctx, aId);
+          const movedB = entityRect(ctx, bId);
+          if (!movedA || !movedB) return false;
+          const remaining = directionalCorrection(
+            constraint.type,
+            movedA,
+            movedB,
+            Math.max(ctx.options.minGap, ctx.options.nodeGap),
+          );
+          return (
+            Math.abs(remaining.dx) <= EPSILON &&
+            Math.abs(remaining.dy) <= EPSILON
+          );
         },
-        {
-          entities: directionalClosure(
-            ctx,
-            bId,
-            -correction.dx,
-            -correction.dy,
-          ),
-          dx: -correction.dx,
-          dy: -correction.dy,
-        },
-      ]);
+      );
     }
   }
 }
@@ -1134,7 +1145,10 @@ function collectViolations(
       b,
       Math.max(ctx.options.minGap, ctx.options.nodeGap),
     );
-    if (Math.abs(correction.dx) > 1 || Math.abs(correction.dy) > 1) {
+    if (
+      Math.abs(correction.dx) > EPSILON ||
+      Math.abs(correction.dy) > EPSILON
+    ) {
       add(`directional constraint ${aId} ${constraint.type} ${bId}`);
     }
   }
@@ -1425,6 +1439,32 @@ export function solveLayout(
         return a && b ? [{ type: constraint.type, a, b }] : [];
       }),
       generations: minimizeIterations,
+      setNodeAxis: (node, axis, value) => {
+        const delta = value - node[axis];
+        if (Math.abs(delta) <= EPSILON) return;
+        const dx = axis === "x" ? delta : 0;
+        const dy = axis === "y" ? delta : 0;
+        translateEntities(ctx, [node.id], dx, dy);
+      },
+      containerIds: ctx.boundaries
+        .filter((boundary) => !boundary.parent)
+        .map((boundary) => boundary.id),
+      containerRect: (id) => rectFromMembers(ctx, id),
+      setContainerAxis: (id, axis, value) => {
+        const rect = rectFromMembers(ctx, id);
+        if (!rect) return;
+        const center =
+          axis === "x"
+            ? (rect.minX + rect.maxX) / 2
+            : (rect.minY + rect.maxY) / 2;
+        const delta = value - center;
+        translateEntity(
+          ctx,
+          id,
+          axis === "x" ? delta : 0,
+          axis === "y" ? delta : 0,
+        );
+      },
       obstacles: () => minimizationObstacles(ctx),
       isValid: (includeLabels) =>
         collectViolations(ctx, includeLabels).messages.length === 0,

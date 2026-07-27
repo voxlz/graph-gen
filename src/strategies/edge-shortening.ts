@@ -5,6 +5,7 @@ import {
   emitIteration,
   EPSILON,
   restore,
+  setNodeAxis,
   snapshot,
 } from "./shared";
 import type { MinimizeOptions } from "./types";
@@ -53,7 +54,7 @@ export function minimizeEdgeLengths(
 
     for (const candidate of edgeCandidates(options)) {
       restore(options.nodes, baselinePositions);
-      candidate.node[candidate.axis] = candidate.value;
+      setNodeAxis(options, candidate.node, candidate.axis, candidate.value);
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
       const candidateScore = compactness(candidateMeasure);

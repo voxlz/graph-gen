@@ -100,6 +100,16 @@ export function restore(nodes: LayoutNode[], positions: NodePosition[]): void {
   });
 }
 
+export function setNodeAxis(
+  options: MinimizeOptions,
+  node: LayoutNode,
+  axis: "x" | "y",
+  value: number,
+): void {
+  if (options.setNodeAxis) options.setNodeAxis(node, axis, value);
+  else node[axis] = value;
+}
+
 export function emitIteration(
   options: MinimizeOptions,
   strategy: string,

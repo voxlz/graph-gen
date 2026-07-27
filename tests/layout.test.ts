@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createCanvas } from "canvas";
-import { solveLayout, type LayoutEdge, type LayoutNode } from "../src/layout";
+import {
+  solveLayout,
+  type LayoutEdge,
+  type LayoutNode,
+  type LayoutOptions,
+} from "../src/layout";
 import { parseGraphText } from "../src/parse";
 import { prepareEdges } from "../src/render";
 
@@ -55,6 +60,38 @@ function bookstoreNode(item: {
   );
 }
 
+function solveGraphFixture(
+  relativePath: string[],
+  overrides: Partial<LayoutOptions>,
+) {
+  const parsed = parseGraphText(
+    fs.readFileSync(path.join(__dirname, "..", ...relativePath), "utf8"),
+  );
+  expect(parsed.errors).toEqual([]);
+  const nodes = parsed.spec.nodes.map(bookstoreNode);
+  const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+  const edges = parsed.spec.edges.map((edge) => {
+    const lines = edge.label?.split("\n") ?? [];
+    return {
+      source: indexById.get(edge.source) as number,
+      target: indexById.get(edge.target) as number,
+      label: edge.label,
+      labelWidth: lines.length
+        ? Math.max(...lines.map((line: string) => textWidth(line)))
+        : 0,
+      labelHeight: lines.length * 16,
+    };
+  });
+  const result = solveLayout(
+    nodes,
+    parsed.spec.boundaries,
+    edges,
+    parsed.spec.constraints,
+    { ...options, ...overrides },
+  );
+  return { nodes, indexById, result };
+}
+
 function rect(current: LayoutNode, padding = 0) {
   return {
     minX: current.x - current.width / 2 - padding,
@@ -93,6 +130,42 @@ function properSegmentsCross(
 }
 
 describe("solveLayout", () => {
+  it("compacts the aligned filesystem row toward the API", () => {
+    const { nodes, indexById, result } = solveGraphFixture(
+      ["demo", "showcase", "example.ggn"],
+      {
+        minGap: 100,
+        nodeGap: 100,
+        iterations: 1000,
+        minimizeIterations: 100,
+      },
+    );
+
+    expect(result.violations).toEqual([]);
+    const api = nodes[indexById.get("api") as number];
+    const db = nodes[indexById.get("db") as number];
+    const cache = nodes[indexById.get("cache") as number];
+    const filesystem = result.groups.get("container")!;
+    expect(db.y).toBeCloseTo(cache.y, 8);
+    expect(filesystem.minY - (api.y + api.height / 2)).toBeLessThan(300);
+  });
+
+  it("compacts aligned edge blocks to their required gap", () => {
+    const { result } = solveGraphFixture(["demo", "showcase", "edges.ggn"], {
+      minGap: 100,
+      nodeGap: 20,
+      iterations: 1000,
+      minimizeIterations: 100,
+    });
+
+    expect(result.violations).toEqual([]);
+    const block1 = result.groups.get("block1")!;
+    const block2 = result.groups.get("block2")!;
+    const gap = block2.minX - block1.maxX;
+    expect(gap).toBeGreaterThanOrEqual(100 - 0.02);
+    expect(gap).toBeLessThan(101);
+  });
+
   it("keeps row and column constraints on matching coordinates", () => {
     const parsed = parseGraphText(`nodes {
   box a
@@ -333,11 +406,17 @@ constraints {
         labelBand: 20,
         nestPad: 36,
         iterations: 1000,
-        minimizeIterations: 0,
+        minimizeIterations: 100,
       },
     );
 
     expect(result.violations).toEqual([]);
+    const vm = result.groups.get("vm")!;
+    const internalNetwork = result.groups.get("internalNetwork")!;
+    expect(internalNetwork.minX - vm.maxX).toBeGreaterThanOrEqual(100 - 0.02);
+    const vmCenterY = (vm.minY + vm.maxY) / 2;
+    const internalCenterY = (internalNetwork.minY + internalNetwork.maxY) / 2;
+    expect(Math.abs(vmCenterY - internalCenterY)).toBeLessThan(150);
   });
 
   it("keeps the SRV client outside its nested network boundaries", () => {

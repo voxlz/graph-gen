@@ -2,11 +2,15 @@
 node_modules/
 
 # Generated output
-renders/
+renders/*
 output.png
 *.png
 
-# ...except the showcase images embedded in the README.
+# ...except demonstration, strategy, and README images.
+!renders/demo/
+!renders/demo/**
+!renders/strategies/
+!renders/strategies/**
 !docs/
 !docs/*.png
 

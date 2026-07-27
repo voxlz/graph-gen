@@ -10,6 +10,7 @@ import {
   nodeRect,
   rectanglesOverlap,
   restore,
+  setNodeAxis,
   snapshot,
 } from "./shared";
 import type { MinimizeOptions, MinimizeRect } from "./types";
@@ -181,7 +182,7 @@ export function minimizeBlockerEscapes(
 
     for (const candidate of escapeCandidates(options)) {
       restore(options.nodes, baselinePositions);
-      candidate.node[candidate.axis] = candidate.value;
+      setNodeAxis(options, candidate.node, candidate.axis, candidate.value);
       minimizeTowardCenter(
         { ...options, onIteration: undefined },
         Math.min(10, options.generations),
