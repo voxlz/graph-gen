@@ -12,6 +12,7 @@ import {
 import {
   compactness,
   compareByKeys,
+  EPSILON,
   restore,
   snapshot,
 } from "./strategies/shared";
@@ -69,9 +70,14 @@ export function minimizeLayout(options: MinimizeOptions): void {
     const angularNotWorse =
       candidateAngularScore <=
       baselineAngularScore + ANGULAR_IMPROVEMENT_EPSILON;
+    const compactnessChanged =
+      candidateScore !== null &&
+      (["area", "perimeter", "largestDimension", "edgeLength"] as const).some(
+        (key) => Math.abs(candidateScore[key] - baselineScore[key]) > EPSILON,
+      );
     if (
       compactnessComparison !== null &&
-      ((compactnessComparison < 0 && angularNotWorse) ||
+      ((compactnessComparison < 0 && compactnessChanged && angularNotWorse) ||
         (compactnessComparison === 0 && angularImproved))
     ) {
       for (const frame of cycleFrames) options.onIteration?.(frame);

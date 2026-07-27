@@ -38,7 +38,7 @@ function tryMinimizeAxis(
   ]) {
     restore(options.nodes, originalPositions);
     setNodeAxis(options, node, axis, original + delta * fraction);
-    if (options.isValid(false) && options.isValid(true)) return true;
+    if (options.isValid(true)) return true;
   }
   restore(options.nodes, originalPositions);
   return false;
@@ -85,7 +85,8 @@ export function minimizeTowardCenter(
   generations = options.generations,
 ): boolean {
   let changed = false;
-  for (let generation = 0; generation < generations; generation++) {
+  const maxGenerations = Math.min(10, Math.max(0, generations));
+  for (let generation = 0; generation < maxGenerations; generation++) {
     let moved = false;
     for (const axis of ["x", "y"] as const) {
       const center = layoutCenter(options.nodes)[axis];

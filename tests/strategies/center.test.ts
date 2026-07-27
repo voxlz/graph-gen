@@ -15,3 +15,12 @@ test("center strategy reduces rendered area and emits accepted iterations", () =
     strategyCase.frames.every((frame) => frame.strategy === "center"),
   ).toBe(true);
 });
+
+test("center strategy bounds its internal generations", () => {
+  const strategyCase = createStrategyCase("center");
+  strategyCase.options.generations = 100;
+
+  minimizeTowardCenter(strategyCase.options);
+
+  expect(strategyCase.frames.length).toBeLessThanOrEqual(10);
+});
