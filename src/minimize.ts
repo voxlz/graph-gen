@@ -5,9 +5,10 @@ import { minimizeEdgeLengths } from "./strategies/edge-shortening";
 import { minimizeNodeSwaps } from "./strategies/node-swap";
 import { minimizeSharedHubCompaction } from "./strategies/shared-hub-compaction";
 import {
-  ANGULAR_IMPROVEMENT_EPSILON,
+  angularReadabilityWeight,
   angularRelaxationScore,
   minimizeAngularRelaxation,
+  readabilityCost,
 } from "./strategies/angular-relaxation";
 import {
   compactness,
@@ -64,12 +65,27 @@ export function minimizeLayout(options: MinimizeOptions): void {
         ])
       : null;
     const candidateAngularScore = angularRelaxationScore(options.edges);
-    const angularImproved =
-      candidateAngularScore <
-      baselineAngularScore - ANGULAR_IMPROVEMENT_EPSILON;
-    const angularNotWorse =
-      candidateAngularScore <=
-      baselineAngularScore + ANGULAR_IMPROVEMENT_EPSILON;
+    const angularWeight = angularReadabilityWeight(options.edges);
+    const baselineReadability = readabilityCost(
+      baselineScore.edgeLength,
+      baselineAngularScore,
+      options.nodeGap,
+      angularWeight,
+    );
+    const candidateReadability = candidateScore
+      ? readabilityCost(
+          candidateScore.edgeLength,
+          candidateAngularScore,
+          options.nodeGap,
+          angularWeight,
+        )
+      : null;
+    const readabilityImproved =
+      candidateReadability !== null &&
+      candidateReadability < baselineReadability - EPSILON;
+    const readabilityNotWorse =
+      candidateReadability !== null &&
+      candidateReadability <= baselineReadability + EPSILON;
     const compactnessChanged =
       candidateScore !== null &&
       (["area", "perimeter", "largestDimension", "edgeLength"] as const).some(
@@ -77,8 +93,10 @@ export function minimizeLayout(options: MinimizeOptions): void {
       );
     if (
       compactnessComparison !== null &&
-      ((compactnessComparison < 0 && compactnessChanged && angularNotWorse) ||
-        (compactnessComparison === 0 && angularImproved))
+      (readabilityImproved ||
+        (readabilityNotWorse &&
+          compactnessChanged &&
+          compactnessComparison < 0))
     ) {
       for (const frame of cycleFrames) options.onIteration?.(frame);
       continue;

@@ -12,7 +12,12 @@ import type { MinimizeEdge, MinimizeOptions } from "./types";
 
 const FULL_TURN = Math.PI * 2;
 const MINIMUM_ANGULAR_GAP = (40 * Math.PI) / 180;
-export const ANGULAR_IMPROVEMENT_EPSILON = 0.01;
+// One completely collapsed angular gap is worth this many node gaps of edge
+// length. Beyond that, aggregate crowding scales superlinearly: layouts with
+// several unresolved gaps should spend more edge length on readability, while
+// an otherwise open layout keeps the lower ratio.
+const ANGULAR_ERROR_EDGE_EQUIVALENT = 0.25;
+const DENSE_CROWDING_PRESSURE = 4.5;
 const ANGULAR_NUDGE_EPSILON = 1e-4;
 const NUDGE_FRACTIONS = [
   1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625,
@@ -80,6 +85,31 @@ function totalAngularError(neighborsByHub: NeighborMap): number {
   return error;
 }
 
+function sharedHubCrowdingPressure(neighborsByHub: NeighborMap): number {
+  let error = 0;
+  let count = 0;
+  for (const [hub, neighbors] of neighborsByHub) {
+    if (neighbors.length < 3) continue;
+    const angles = neighbors
+      .map((neighbor) =>
+        normalizedAngle(Math.atan2(neighbor.y - hub.y, neighbor.x - hub.x)),
+      )
+      .sort((a, b) => a - b);
+    if (angles.length < 2) continue;
+    for (let index = 0; index < angles.length; index++) {
+      const next = angles[(index + 1) % angles.length];
+      if (
+        normalizedAngle(next - angles[index]) <
+        MINIMUM_ANGULAR_GAP - ANGULAR_NUDGE_EPSILON
+      ) {
+        count++;
+      }
+    }
+    error += hubAngularError(hub, neighbors);
+  }
+  return error * count;
+}
+
 function obstacleArea(options: MinimizeOptions): number {
   const bounds = measureBounds(
     options.obstacles().map((obstacle) => obstacle.rect),
@@ -89,6 +119,27 @@ function obstacleArea(options: MinimizeOptions): number {
 
 export function angularRelaxationScore(edges: MinimizeEdge[]): number {
   return totalAngularError(buildNeighborMap(edges));
+}
+
+export function readabilityCost(
+  edgeLength: number,
+  angularError: number,
+  nodeGap: number,
+  angularWeight: number,
+): number {
+  return edgeLength + angularError * nodeGap * angularWeight;
+}
+
+function readabilityWeight(neighborsByHub: NeighborMap): number {
+  const crowdingPressure = sharedHubCrowdingPressure(neighborsByHub);
+  return (
+    ANGULAR_ERROR_EDGE_EQUIVALENT *
+    Math.max(1, (crowdingPressure / DENSE_CROWDING_PRESSURE) ** 6)
+  );
+}
+
+export function angularReadabilityWeight(edges: MinimizeEdge[]): number {
+  return readabilityWeight(buildNeighborMap(edges));
 }
 
 function targetAngle(
@@ -180,6 +231,8 @@ function tryRelaxNeighbor(
   if (radius <= EPSILON) return null;
   const originalAngle = Math.atan2(dy, dx);
   const originalPositions = snapshot(options.nodes);
+  const originalX = neighbor.x;
+  const originalY = neighbor.y;
 
   const target = targetAngle(hub, neighbor, connected);
   if (target === null) return null;
@@ -187,8 +240,16 @@ function tryRelaxNeighbor(
   const maximumAngularAdjustment = Math.abs(delta) + ANGULAR_NUDGE_EPSILON;
   const targetX = hub.x + Math.cos(target) * radius;
   const targetY = hub.y + Math.sin(target) * radius;
+  const baselineMeasure = options.measure();
+  if (!baselineMeasure) return null;
+  const angularWeight = readabilityWeight(neighborsByHub);
   let bestError = baselineError;
-  let bestEdgeLength = compactness(options.measure()!).edgeLength;
+  let bestReadability = readabilityCost(
+    baselineMeasure.edgeLength,
+    baselineError,
+    options.nodeGap,
+    angularWeight,
+  );
   let bestPositions: ReturnType<typeof snapshot> | null = null;
   for (const fraction of NUDGE_FRACTIONS) {
     const candidateAngle = originalAngle + delta * fraction;
@@ -215,6 +276,12 @@ function tryRelaxNeighbor(
       if (candidate.y !== undefined) {
         setNodeAxis(options, neighbor, "y", candidate.y);
       }
+      if (
+        Math.hypot(neighbor.x - originalX, neighbor.y - originalY) >
+        options.nodeGap + EPSILON
+      ) {
+        continue;
+      }
       const candidateAngle = Math.atan2(neighbor.y - hub.y, neighbor.x - hub.x);
       if (
         Math.abs(signedAngleDifference(originalAngle, candidateAngle)) >
@@ -227,15 +294,18 @@ function tryRelaxNeighbor(
       const candidateError = totalAngularError(neighborsByHub);
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
-      const candidateEdgeLength = compactness(candidateMeasure).edgeLength;
-      // Edge length is only a guard here: relaxation may never lengthen edges,
-      // but shortening them is edge-shortening's job, not a reason to accept.
+      const candidateReadability = readabilityCost(
+        candidateMeasure.edgeLength,
+        candidateError,
+        options.nodeGap,
+        angularWeight,
+      );
       if (
-        candidateEdgeLength <= bestEdgeLength + EPSILON &&
-        candidateError < bestError - ANGULAR_NUDGE_EPSILON
+        candidateError < baselineError - ANGULAR_NUDGE_EPSILON &&
+        candidateReadability < bestReadability - EPSILON
       ) {
         bestError = candidateError;
-        bestEdgeLength = candidateEdgeLength;
+        bestReadability = candidateReadability;
         bestPositions = snapshot(options.nodes);
       }
     }

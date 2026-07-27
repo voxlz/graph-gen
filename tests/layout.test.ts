@@ -526,8 +526,32 @@ constraints {
     const hub = nodes[indexById.get("hub") as number];
     const n1 = nodes[indexById.get("n1") as number];
     const n3 = nodes[indexById.get("n3") as number];
-    expect(n1.y).toBeLessThan(hub.y - 1);
+    // n1 is pinned to the right of the hub and n3 below it, so each keeps one
+    // free axis. Minimization should spend that freedom levelling the spoke,
+    // not leaving the node stranded diagonally.
+    expect(n1.x).toBeGreaterThan(hub.x + 1);
+    expect(Math.abs(n1.y - hub.y)).toBeLessThan(n1.height);
+    expect(n3.y).toBeGreaterThan(hub.y + 1);
     expect(n3.x).toBeLessThan(hub.x - 1);
+    // Eight spokes cannot all clear the minimum angular gap, so this hub keeps a
+    // large residual angular error however it is drawn. Minimization still has
+    // to compact it rather than abandoning the cycle over that error moving.
+    const totalSpokeLength = [
+      "n1",
+      "n2",
+      "n3",
+      "n4",
+      "n5",
+      "n6",
+      "wide",
+      "tiny",
+    ]
+      .map((id) => nodes[indexById.get(id) as number])
+      .reduce(
+        (sum, spoke) => sum + Math.hypot(spoke.x - hub.x, spoke.y - hub.y),
+        0,
+      );
+    expect(totalSpokeLength).toBeLessThan(3000);
   });
 
   it("solves bookstore UC2 with merged multiline edge labels", () => {

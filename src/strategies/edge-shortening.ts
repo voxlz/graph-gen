@@ -1,5 +1,10 @@
 import type { LayoutNode } from "../layout";
 import {
+  angularReadabilityWeight,
+  angularRelaxationScore,
+  readabilityCost,
+} from "./angular-relaxation";
+import {
   compactness,
   compareByKeys,
   emitIteration,
@@ -48,8 +53,17 @@ export function minimizeEdgeLengths(
     const baselineMeasure = options.measure();
     if (!baselineMeasure) return changed;
     const baselineScore = compactness(baselineMeasure);
+    const baselineAngularError = angularRelaxationScore(options.edges);
+    const angularWeight = angularReadabilityWeight(options.edges);
+    const baselineReadability = readabilityCost(
+      baselineMeasure.edgeLength,
+      baselineAngularError,
+      options.nodeGap,
+      angularWeight,
+    );
     const baselinePositions = snapshot(options.nodes);
     let bestScore = baselineScore;
+    let bestReadability = baselineReadability;
     let bestPositions: ReturnType<typeof snapshot> | null = null;
 
     for (const candidate of edgeCandidates(options)) {
@@ -58,16 +72,26 @@ export function minimizeEdgeLengths(
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
       const candidateScore = compactness(candidateMeasure);
+      const candidateReadability = readabilityCost(
+        candidateMeasure.edgeLength,
+        angularRelaxationScore(options.edges),
+        options.nodeGap,
+        angularWeight,
+      );
       if (
         candidateScore.area <= maximumArea + EPSILON &&
-        compareByKeys(candidateScore, bestScore, [
-          "edgeLength",
-          "area",
-          "perimeter",
-          "largestDimension",
-        ]) < 0
+        candidateScore.edgeLength < baselineScore.edgeLength - EPSILON &&
+        (candidateReadability < bestReadability - EPSILON ||
+          (Math.abs(candidateReadability - bestReadability) <= EPSILON &&
+            compareByKeys(candidateScore, bestScore, [
+              "edgeLength",
+              "area",
+              "perimeter",
+              "largestDimension",
+            ]) < 0))
       ) {
         bestScore = candidateScore;
+        bestReadability = candidateReadability;
         bestPositions = snapshot(options.nodes);
       }
     }
