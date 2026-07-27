@@ -102,9 +102,9 @@ Example global default in `style.jsonc`:
 
 ```jsonc
 {
-    "graph": {
-        "outputPath": "../graphs/{file}"
-    }
+  "graph": {
+    "outputPath": "../graphs/{file}",
+  },
 }
 ```
 
@@ -273,7 +273,7 @@ styles; only the file being rendered contributes edges.
 Set `graph.layout` to choose how nodes are positioned:
 
 - `constraint` (default) — custom engine focused on predictable constraints and
-    explicit validation of constraints and overlap rules.
+  explicit validation of constraints and overlap rules.
 - `cola` — legacy WebCola-only layout pass.
 
 If the same setting appears in multiple places, this precedence applies:
@@ -289,9 +289,9 @@ Global default in `style.jsonc`:
 
 ```jsonc
 {
-    "graph": {
-        "layout": "constraint"
-    }
+  "graph": {
+    "layout": "constraint",
+  },
 }
 ```
 
