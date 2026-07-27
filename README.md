@@ -83,14 +83,38 @@ mkdir -p out
 docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.ggn out/output.png
 ```
 
-The image appears at `./out/output.png` on your machine. Swap in your own `.ggn`
-input path and output name as needed.
+The image appears at `./out/output.png` on your machine. Replace the input and
+output paths with your own as needed.
 
-The output argument is optional. A graph can instead define `outputPath` in its
-`graph` block, for example `outputPath "../graphs/{file}"`. `{file}` expands to
-the input filename with a `.png` extension, and configured relative paths are
-resolved from the input graph's directory. An explicit CLI output path takes
-precedence. The default style writes to `../graphs/{file}`.
+The output argument is optional. If you omit it, graphgen picks the output path
+in this order:
+
+1. CLI output argument (`tsx src/index.ts input.ggn out/output.png`)
+2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
+3. Global style setting (`style.jsonc` -> `graph.outputPath`)
+4. Built-in fallback (`../graphs/{file}`)
+
+`{file}` expands to the input filename with a `.png` extension. For example,
+`checkout_scope.ggn` becomes `checkout_scope.png`. Relative paths are resolved
+from the input graph's directory.
+
+Example global default in `style.jsonc`:
+
+```jsonc
+{
+    "graph": {
+        "outputPath": "../graphs/{file}"
+    }
+}
+```
+
+Example per-graph override:
+
+```text
+graph {
+        outputPath "./renders/{file}"
+}
+```
 
 To override the styles, mount your own style file and pass it as the third
 argument (same as the local run):
@@ -187,9 +211,35 @@ api --> db: "READ {rows}"    // edge label
 See the [Edges](#edges) showcase for the arrow/line styles
 and [Constraints](#constraints) for placement rules.
 
+### Label formatting templates
+
+Use `labelFormat` in the `graph { ... }` block to keep edge labels consistent
+and readable.
+
+```text
+graph {
+    labelFormat "{index}. {source} -> {target}: {label}"
+}
+```
+
+You can use these placeholders:
+
+- `{index}` (1-based edge index)
+- `{source}`, `{target}`, `{label}`
+- `{arrowSource}`, `{arrowTarget}`
+- `{lineStyle}`, `{line}`
+
+Behavior:
+
+- Formatting is applied only to labelled edges.
+- Unknown placeholders are left unchanged.
+- If `labelFormat` is omitted or empty, labels are rendered as written.
+
 ## Reuse graph with new edges
 
-In threat modeling you often times may want to reuse a "base graph" with new edges, do describe a dataflow. This is supported with `import "..."`, then declaring new edges:
+In threat modeling, you often want to reuse a base graph and add new edges to
+describe a specific data flow. Use `import "..."` and then declare the new
+edges:
 
 ```text
 import "../scopes/checkout_scope.ggn"
@@ -201,45 +251,6 @@ edges {
 
 The imported graph contributes its nodes, boundaries, groups, constraints and
 styles; only the file being rendered contributes edges.
-
-## Layout architecture
-
-`src/layout.ts` solves node and boundary positions and validates every hard
-requirement: directional constraints, clearances, containment, straight-edge
-intersections and crossings, and label collisions. It invokes minimization only
-after finding a valid layout.
-
-`src/minimize.ts` runs the fixed-point minimization cycle and rolls back a cycle
-that does not improve the result. The implementations live in
-`src/strategies/`: center compaction, edge shortening, blocker escape,
-same-container swaps, angular relaxation of edges around shared hubs, and
-disconnected-node perimeter relocation.
-Angular relaxation tries radial and single-axis nudges independently, allowing
-nodes with directional constraints to spread along their unconstrained axis.
-Candidate moves are accepted only through the layout solver's validation and
-measurement callbacks, so minimization cannot weaken or bypass layout
-requirements.
-
-### Inspecting minimization strategies
-
-Each strategy has an isolated test in `tests/strategies/` and a matching JSON
-case in `tests/strategies/cases/`. Run the tests with:
-
-```sh
-npm test -- --runInBand tests/strategies
-```
-
-Generate the visual series with:
-
-```sh
-npm run render-strategies
-```
-
-The command writes one folder per strategy below `renders/strategies/`.
-`iteration-0000.png` is the input layout; each following image is an accepted
-strategy iteration. The fixtures use a fixed viewport, so movement can be
-compared directly from frame to frame. These series are separate from solver
-debug frames controlled by `graph.debugFrameEvery`.
 
 ## Styling
 
@@ -253,34 +264,47 @@ debug frames controlled by `graph.debugFrameEvery`.
 - `graph.iterations` — the three WebCola solver passes
   `[unconstrained, userConstraint, allConstraint]` (also overridable at runtime
   with `GRAPHGEN_ITERS=a,b,c`).
-- `graph.layout` — layout engine: `constraint` (default) or the legacy `cola`
-  engine. Override it with `GRAPHGEN_LAYOUT`.
-- `graph.layoutIterations` — maximum custom-solver iterations, default `1000`.
-  Override it with `GRAPHGEN_LAYOUT_ITERS`.
-- `graph.minimize` — post-layout generations that first move nodes toward the
-  center, then shorten edges, escape blocked local minima, and swap nodes in the
-  same container when that reduces total edge length. A fifth stage spreads
-  blocked neighbors of a shared hub to an equal radius with minimum node-gap
-  separation, and a sixth relocates edge-free perimeter nodes around nearby
-  components to reduce rendered area. Those six stages repeat until rendered
-  size no longer improves; an equal-size result may also be retained when it
-  shortens total edge length. Every step preserves all hard constraints, and
-  edge shortening may grow the rendered area by at most 5% within a cycle. It
-  defaults to `100`; set it to `0` to disable compaction. Override it with
-  `GRAPHGEN_MINIMIZE`.
-- `graph.debugFrameEvery` — write a solver progress PNG every N iterations. It
-  defaults to `0` (disabled); set it to `5`, for example, to write frames beside
-  the output in `<output-name>.frames/`. Override it with
-  `GRAPHGEN_DEBUG_FRAMES`.
 - `shapes.<name>` — per-shape `color`, `lineStyle` (`solid`/`dashed`),
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
 
-Within a graph's `graph { ... }` block, `labelFormat` is an optional template
-applied to each labelled edge before duplicate edges are merged. It receives
-`{index}` (one-based) plus every parsed edge property, such as `{source}`,
-`{target}`, `{label}`, `{arrowSource}`, `{arrowTarget}`, `{lineStyle}`, and
-`{line}`. An empty value leaves labels unchanged.
+### Layout engines: custom constraint vs cola
+
+Set `graph.layout` to choose how nodes are positioned:
+
+- `constraint` (default) — custom engine focused on predictable constraints and
+    explicit validation of constraints and overlap rules.
+- `cola` — legacy WebCola-only layout pass.
+
+If the same setting appears in multiple places, this precedence applies:
+
+1. `GRAPHGEN_LAYOUT` environment variable
+2. per-graph `graph { layout "..." }`
+3. global style `style.jsonc` (`graph.layout`)
+4. default `constraint`
+
+Examples:
+
+Global default in `style.jsonc`:
+
+```jsonc
+{
+    "graph": {
+        "layout": "constraint"
+    }
+}
+```
+
+Per-graph override:
+
+```text
+graph {
+        layout "cola"
+}
+```
+
+You can also set `graph.layoutIterations` (or `GRAPHGEN_LAYOUT_ITERS`) to
+control how many iterations the `constraint` engine can use before stopping.
 
 A graph's own `shapes { ... }` block overrides global shape defaults for that
 graph only, and a custom style file can be passed per render (the optional third

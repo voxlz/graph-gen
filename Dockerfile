@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 COPY package.json ./
-RUN npm install --omit=dev
+# Skip lifecycle scripts (e.g. husky prepare) in production image installs.
+RUN npm install --omit=dev --ignore-scripts
 COPY src ./src
 COPY style.jsonc ./
 COPY demo ./demo
