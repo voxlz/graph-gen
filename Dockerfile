@@ -14,8 +14,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 COPY package.json ./
-# Skip lifecycle scripts (e.g. husky prepare) in production image installs.
-RUN npm install --omit=dev --ignore-scripts
+# Skip lifecycle scripts (e.g. husky prepare) and rebuild canvas explicitly so
+# native bindings are always present in the final image.
+RUN npm install --omit=dev --ignore-scripts && npm rebuild canvas --build-from-source
 COPY src ./src
 COPY style.jsonc ./
 COPY demo ./demo
