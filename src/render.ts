@@ -3,10 +3,7 @@ import path from "node:path";
 import * as cola from "webcola";
 import { createCanvas } from "canvas";
 import { stripComments, type GraphSpec } from "./parse";
-import {
-  solveConstraintLayout,
-  type LayoutSnapshot,
-} from "./constraint-layout";
+import { solveLayout, type LayoutSnapshot } from "./layout";
 
 export interface RenderResult {
   width: number;
@@ -648,7 +645,7 @@ export async function renderGraph(
   // nodeGap for the duration of the solve, then restore the true render size.
   let constraintGroupRects: Map<string, any> | null = null;
   if (graphMeta.layout === "constraint") {
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       boundaries,
       links,

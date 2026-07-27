@@ -10,6 +10,7 @@
     "render-all": "tsx src/render-all.ts",
     "watch": "tsx src/watch.ts",
     "verify": "tsx src/verify.ts",
+    "render-strategies": "tsx tests/strategies/render-series.ts",
     "test": "jest",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",

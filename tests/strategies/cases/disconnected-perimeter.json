@@ -1,0 +1,36 @@
+{
+  "name": "disconnected-perimeter",
+  "nodeGap": 20,
+  "generations": 3,
+  "viewport": { "minX": -240, "minY": -240, "maxX": 340, "maxY": 240 },
+  "nodes": [
+    {
+      "id": "customer",
+      "x": 0,
+      "y": -130,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": null
+    },
+    {
+      "id": "attacker",
+      "x": 230,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": null
+    },
+    {
+      "id": "anchor",
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "cloud"
+    }
+  ],
+  "edges": [["customer", "anchor"]],
+  "boundaries": [
+    { "id": "cloud", "minX": -100, "minY": -100, "maxX": 100, "maxY": 100 }
+  ]
+}

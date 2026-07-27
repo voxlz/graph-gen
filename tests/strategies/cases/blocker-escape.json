@@ -1,0 +1,36 @@
+{
+  "name": "blocker-escape",
+  "nodeGap": 20,
+  "generations": 3,
+  "viewport": { "minX": -380, "minY": -270, "maxX": 380, "maxY": 210 },
+  "nodes": [
+    {
+      "id": "left",
+      "x": -300,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": null
+    },
+    {
+      "id": "right",
+      "x": 300,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": null
+    },
+    {
+      "id": "top-anchor",
+      "x": 0,
+      "y": -200,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": null
+    }
+  ],
+  "edges": [],
+  "boundaries": [
+    { "id": "wall", "minX": -100, "minY": -80, "maxX": 100, "maxY": 80 }
+  ]
+}

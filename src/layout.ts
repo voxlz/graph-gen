@@ -1,8 +1,8 @@
 import {
-  minimizeCompoundLayout,
-  type CompactLayoutMeasure,
-  type CompactObstacle,
-} from "./compound-minimize";
+  minimizeLayout,
+  type MinimizeMeasure,
+  type MinimizeObstacle,
+} from "./minimize";
 
 export interface LayoutNode {
   id: string;
@@ -48,7 +48,7 @@ export interface LayoutConstraint {
   bottom?: string;
 }
 
-export interface ConstraintLayoutOptions {
+export interface LayoutOptions {
   minGap: number;
   nodeGap: number;
   boundaryPad: number;
@@ -75,7 +75,7 @@ export interface LayoutSnapshot {
   }>;
 }
 
-export interface ConstraintLayoutResult {
+export interface LayoutResult {
   valid: boolean;
   iterations: number;
   violations: string[];
@@ -88,7 +88,7 @@ interface LayoutContext {
   boundaries: LayoutBoundary[];
   edges: LayoutEdge[];
   constraints: LayoutConstraint[];
-  options: ConstraintLayoutOptions;
+  options: LayoutOptions;
   nodeById: Map<string, LayoutNode>;
   nodeIndex: Map<LayoutNode, number>;
   boundaryById: Map<string, LayoutBoundary>;
@@ -1150,7 +1150,7 @@ function makeContext(
   boundaries: LayoutBoundary[],
   edges: LayoutEdge[],
   constraints: LayoutConstraint[],
-  options: ConstraintLayoutOptions,
+  options: LayoutOptions,
 ): LayoutContext {
   const boundaryById = new Map(
     boundaries.map((boundary) => [boundary.id, boundary]),
@@ -1218,65 +1218,7 @@ function captureSnapshot(
   };
 }
 
-function layoutCenter(ctx: LayoutContext): { x: number; y: number } {
-  const bounds = ctx.nodes.reduce<LayoutRect>(
-    (result, node) => {
-      const rect = nodeRect(node);
-      result.minX = Math.min(result.minX, rect.minX);
-      result.maxX = Math.max(result.maxX, rect.maxX);
-      result.minY = Math.min(result.minY, rect.minY);
-      result.maxY = Math.max(result.maxY, rect.maxY);
-      return result;
-    },
-    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-  );
-  return Number.isFinite(bounds.minX) ? rectCenter(bounds) : { x: 0, y: 0 };
-}
-
-function tryMinimizeAxis(
-  ctx: LayoutContext,
-  node: LayoutNode,
-  axis: "x" | "y",
-  center: number,
-): boolean {
-  const original = node[axis];
-  const delta = center - original;
-  if (Math.abs(delta) <= EPSILON) return false;
-  for (const fraction of [
-    1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,
-    0.001953125,
-  ]) {
-    node[axis] = original + delta * fraction;
-    if (
-      collectViolations(ctx, false).messages.length === 0 &&
-      collectViolations(ctx).messages.length === 0
-    ) {
-      return true;
-    }
-    node[axis] = original;
-  }
-  return false;
-}
-
-function minimizeLayout(ctx: LayoutContext, generations: number): void {
-  for (let generation = 0; generation < generations; generation++) {
-    let moved = false;
-    for (const axis of ["x", "y"] as const) {
-      const center = layoutCenter(ctx)[axis];
-      const orderedNodes = [...ctx.nodes].sort(
-        (a, b) =>
-          Math.abs(b[axis] - center) - Math.abs(a[axis] - center) ||
-          a.id.localeCompare(b.id),
-      );
-      for (const node of orderedNodes) {
-        moved = tryMinimizeAxis(ctx, node, axis, center) || moved;
-      }
-    }
-    if (!moved) break;
-  }
-}
-
-function measureCompactLayout(ctx: LayoutContext): CompactLayoutMeasure | null {
+function measureLayout(ctx: LayoutContext): MinimizeMeasure | null {
   const check = collectViolations(ctx);
   if (check.messages.length > 0) return null;
   const groupRects = allGroupRects(ctx);
@@ -1296,7 +1238,7 @@ function measureCompactLayout(ctx: LayoutContext): CompactLayoutMeasure | null {
   return { rects, edgeLength };
 }
 
-function compactObstacles(ctx: LayoutContext): CompactObstacle[] {
+function minimizationObstacles(ctx: LayoutContext): MinimizeObstacle[] {
   const groupRects = allGroupRects(ctx);
   return [
     ...ctx.nodes.map((node) => ({
@@ -1312,66 +1254,13 @@ function compactObstacles(ctx: LayoutContext): CompactObstacle[] {
   ];
 }
 
-function compactMeasureArea(measure: CompactLayoutMeasure): number {
-  if (measure.rects.length === 0) return 0;
-  const bounds = measure.rects.reduce<LayoutRect>(
-    (result, rect) => ({
-      minX: Math.min(result.minX, rect.minX),
-      maxX: Math.max(result.maxX, rect.maxX),
-      minY: Math.min(result.minY, rect.minY),
-      maxY: Math.max(result.maxY, rect.maxY),
-    }),
-    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-  );
-  return (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
-}
-
-function minimizeUntilSizeStable(
-  ctx: LayoutContext,
-  generations: number,
-): void {
-  const edges = ctx.edges.map((edge) => {
-    const [source, target] = edgeNodeIndices(edge, ctx);
-    return { source: ctx.nodes[source], target: ctx.nodes[target] };
-  });
-  for (let cycle = 0; cycle < generations; cycle++) {
-    const baselineMeasure = measureCompactLayout(ctx);
-    if (!baselineMeasure) return;
-    const baselineArea = compactMeasureArea(baselineMeasure);
-    const baselinePositions = ctx.nodes.map(({ x, y }) => ({ x, y }));
-
-    minimizeLayout(ctx, generations);
-    minimizeCompoundLayout({
-      nodes: ctx.nodes,
-      edges,
-      nodeGap: ctx.options.nodeGap,
-      generations,
-      obstacles: () => compactObstacles(ctx),
-      measure: () => measureCompactLayout(ctx),
-      relax: () => minimizeLayout(ctx, Math.min(10, generations)),
-    });
-
-    const candidateMeasure = measureCompactLayout(ctx);
-    const candidateArea = candidateMeasure
-      ? compactMeasureArea(candidateMeasure)
-      : Infinity;
-    const scale = Math.max(1, baselineArea, candidateArea);
-    if (candidateArea < baselineArea - scale * 1e-9) continue;
-    ctx.nodes.forEach((node, index) => {
-      node.x = baselinePositions[index].x;
-      node.y = baselinePositions[index].y;
-    });
-    break;
-  }
-}
-
-export function solveConstraintLayout(
+export function solveLayout(
   nodes: LayoutNode[],
   boundaries: LayoutBoundary[],
   edges: LayoutEdge[],
   constraints: LayoutConstraint[],
-  options: ConstraintLayoutOptions,
-): ConstraintLayoutResult {
+  options: LayoutOptions,
+): LayoutResult {
   const ctx = makeContext(nodes, boundaries, edges, constraints, options);
   initializeGrid(ctx);
   const snapshots: LayoutSnapshot[] = [];
@@ -1413,7 +1302,19 @@ export function solveConstraintLayout(
       0,
       Math.floor(options.minimizeIterations ?? 100),
     );
-    minimizeUntilSizeStable(ctx, minimizeIterations);
+    minimizeLayout({
+      nodes: ctx.nodes,
+      edges: ctx.edges.map((edge) => {
+        const [source, target] = edgeNodeIndices(edge, ctx);
+        return { source: ctx.nodes[source], target: ctx.nodes[target] };
+      }),
+      nodeGap: ctx.options.nodeGap,
+      generations: minimizeIterations,
+      obstacles: () => minimizationObstacles(ctx),
+      isValid: (includeLabels) =>
+        collectViolations(ctx, includeLabels).messages.length === 0,
+      measure: () => measureLayout(ctx),
+    });
     check = collectViolations(ctx);
   }
   if (every > 0) {

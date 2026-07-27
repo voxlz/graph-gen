@@ -1,0 +1,45 @@
+{
+  "name": "node-swap",
+  "nodeGap": 40,
+  "generations": 3,
+  "viewport": { "minX": -550, "minY": -260, "maxX": 1350, "maxY": 260 },
+  "nodes": [
+    {
+      "id": "first",
+      "x": 0,
+      "y": -100,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "items"
+    },
+    {
+      "id": "second",
+      "x": 800,
+      "y": 100,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "items"
+    },
+    {
+      "id": "left-anchor",
+      "x": -400,
+      "y": 100,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "anchors"
+    },
+    {
+      "id": "right-anchor",
+      "x": 1200,
+      "y": -100,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "anchors"
+    }
+  ],
+  "edges": [
+    ["first", "right-anchor"],
+    ["second", "left-anchor"]
+  ],
+  "boundaries": []
+}

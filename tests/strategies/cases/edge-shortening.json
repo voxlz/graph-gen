@@ -1,0 +1,26 @@
+{
+  "name": "edge-shortening",
+  "nodeGap": 40,
+  "generations": 3,
+  "viewport": { "minX": -650, "minY": -260, "maxX": 650, "maxY": 260 },
+  "nodes": [
+    {
+      "id": "source",
+      "x": -500,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    },
+    {
+      "id": "target",
+      "x": 500,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    }
+  ],
+  "edges": [["source", "target"]],
+  "boundaries": []
+}

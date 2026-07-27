@@ -1,0 +1,26 @@
+{
+  "name": "center",
+  "nodeGap": 40,
+  "generations": 4,
+  "viewport": { "minX": -650, "minY": -260, "maxX": 650, "maxY": 260 },
+  "nodes": [
+    {
+      "id": "left",
+      "x": -500,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    },
+    {
+      "id": "right",
+      "x": 500,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    }
+  ],
+  "edges": [],
+  "boundaries": []
+}

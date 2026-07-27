@@ -1,11 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createCanvas } from "canvas";
-import {
-  solveConstraintLayout,
-  type LayoutEdge,
-  type LayoutNode,
-} from "../src/constraint-layout";
+import { solveLayout, type LayoutEdge, type LayoutNode } from "../src/layout";
 import { parseGraphText } from "../src/parse";
 import { prepareEdges } from "../src/render";
 
@@ -96,17 +92,17 @@ function properSegmentsCross(
   return a1 * a2 < 0 && b1 * b2 < 0;
 }
 
-describe("solveConstraintLayout", () => {
+describe("solveLayout", () => {
   it("minimizes disconnected nodes to their exact clearance", () => {
     const baselineNodes = [node("wide", 400, 60), node("small", 40, 60)];
-    solveConstraintLayout(baselineNodes, [], [], [], {
+    solveLayout(baselineNodes, [], [], [], {
       ...options,
       minimizeIterations: 0,
     });
     const baselineDistance = Math.abs(baselineNodes[0].x - baselineNodes[1].x);
 
     const minimizedNodes = [node("wide", 400, 60), node("small", 40, 60)];
-    const result = solveConstraintLayout(minimizedNodes, [], [], [], {
+    const result = solveLayout(minimizedNodes, [], [], [], {
       ...options,
       minimizeIterations: 100,
     });
@@ -126,7 +122,7 @@ describe("solveConstraintLayout", () => {
   it("orders differently sized rectangular nodes without overlap", () => {
     const nodes = [node("wide", 180, 40), node("tall", 50, 160)];
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       [],
       [],
@@ -151,7 +147,7 @@ describe("solveConstraintLayout", () => {
       node("b2", 100, 60, "rightGroup"),
     ];
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       [
         { id: "leftGroup", draw: false },
@@ -182,7 +178,7 @@ describe("solveConstraintLayout", () => {
       { source: 1, target: 2 },
     ];
 
-    const result = solveConstraintLayout(nodes, [], edges, [], options);
+    const result = solveLayout(nodes, [], edges, [], options);
 
     expect(result.valid).toBe(true);
     const first = {
@@ -216,7 +212,7 @@ describe("solveConstraintLayout", () => {
       },
     ];
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       [],
       edges,
@@ -262,7 +258,7 @@ describe("solveConstraintLayout", () => {
       labelHeight: edge.label ? 16 : 0,
     }));
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       parsed.spec.boundaries,
       edges,
@@ -301,7 +297,7 @@ describe("solveConstraintLayout", () => {
       },
     );
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       scope.boundaries,
       edges,
@@ -348,7 +344,7 @@ describe("solveConstraintLayout", () => {
       },
     );
 
-    const result = solveConstraintLayout(
+    const result = solveLayout(
       nodes,
       scope.boundaries,
       edges,

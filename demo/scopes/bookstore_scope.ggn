@@ -12,7 +12,7 @@ nodes {
             circle gateway: "API Gateway"
             circle catalog: "Catalog Service"
             circle orders: "Order Service"
-            database postgres: "PostgreSQL"
+            database     postgres: "PostgreSQL"
             database cache: "Redis Cache"
             actor rogue: "Compromised Container"
         }

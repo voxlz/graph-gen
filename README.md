@@ -199,6 +199,42 @@ edges {
 The imported graph contributes its nodes, boundaries, groups, constraints and
 styles; only the file being rendered contributes edges.
 
+## Layout architecture
+
+`src/layout.ts` solves node and boundary positions and validates every hard
+requirement: directional constraints, clearances, containment, straight-edge
+intersections and crossings, and label collisions. It invokes minimization only
+after finding a valid layout.
+
+`src/minimize.ts` runs the fixed-point minimization cycle and rolls back a cycle
+that does not improve the result. The implementations live in
+`src/strategies/`: center compaction, edge shortening, blocker escape,
+same-container swaps, and disconnected-node perimeter relocation.
+Candidate moves are accepted only through the layout solver's validation and
+measurement callbacks, so minimization cannot weaken or bypass layout
+requirements.
+
+### Inspecting minimization strategies
+
+Each strategy has an isolated test in `tests/strategies/` and a matching JSON
+case in `tests/strategies/cases/`. Run the tests with:
+
+```sh
+npm test -- --runInBand tests/strategies
+```
+
+Generate the visual series with:
+
+```sh
+npm run render-strategies
+```
+
+The command writes one folder per strategy below `renders/strategies/`.
+`iteration-0000.png` is the input layout; each following image is an accepted
+strategy iteration. The fixtures use a fixed viewport, so movement can be
+compared directly from frame to frame. These series are separate from solver
+debug frames controlled by `graph.debugFrameEvery`.
+
 ## Styling
 
 `style.jsonc` holds the global defaults:
@@ -217,9 +253,10 @@ styles; only the file being rendered contributes edges.
   Override it with `GRAPHGEN_LAYOUT_ITERS`.
 - `graph.minimize` — post-layout generations that first move nodes toward the
   center, then shorten edges, escape blocked local minima, and swap nodes in the
-  same container when that reduces total edge length. A fourth stage relocates
+  same container when that reduces total edge length. A fifth stage relocates
   edge-free perimeter nodes around nearby components to reduce rendered area.
-  Those four stages repeat until rendered area no longer improves. Every step
+  Those five stages repeat until rendered size no longer improves; an equal-size
+  result may also be retained when it shortens total edge length. Every step
   preserves all hard constraints, and edge shortening may grow the rendered
   area by at most 5% within a cycle. It defaults to `100`; set it to `0` to
   disable compaction. Override it with `GRAPHGEN_MINIMIZE`.
