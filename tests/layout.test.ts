@@ -9,6 +9,7 @@ import {
 } from "../src/layout";
 import { parseGraphText } from "../src/parse";
 import { prepareEdges } from "../src/render";
+import { angularRelaxationScore } from "../src/strategies/angular-relaxation";
 
 const options = {
   minGap: 30,
@@ -456,7 +457,7 @@ constraints {
     expect(result.violations).toEqual([]);
   });
 
-  it("minimizes shared-hub edge length in the compass topology", () => {
+  it("relaxes shared-hub angles in the compass topology", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "..", "demo", "showcase", "compass.ggn"),
       "utf8",
@@ -488,14 +489,45 @@ constraints {
     );
 
     expect(result.violations).toEqual([]);
+    expect(
+      angularRelaxationScore(
+        parsed.spec.edges.map((edge) => ({
+          source: nodes[indexById.get(edge.source) as number],
+          target: nodes[indexById.get(edge.target) as number],
+        })),
+      ),
+    ).toBeLessThan(0.8);
     const center = nodes[indexById.get("center") as number];
-    const distances = ["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((id) => {
-      const spoke = nodes[indexById.get(id) as number];
-      return Math.hypot(spoke.x - center.x, spoke.y - center.y);
-    });
-    expect(distances.reduce((sum, distance) => sum + distance, 0)).toBeLessThan(
-      2000,
+    const totalSpokeLength = ["n", "s", "e", "w", "ne", "nw", "se", "sw"]
+      .map((id) => nodes[indexById.get(id) as number])
+      .reduce(
+        (sum, spoke) =>
+          sum + Math.hypot(spoke.x - center.x, spoke.y - center.y),
+        0,
+      );
+    expect(totalSpokeLength).toBeLessThan(2000);
+  });
+
+  it("relaxes constrained overlap spokes along their free axes", () => {
+    const { nodes, indexById, result } = solveGraphFixture(
+      ["demo", "showcase", "overlap.ggn"],
+      {
+        minGap: 100,
+        nodeGap: 100,
+        boundaryPad: 20,
+        labelBand: 20,
+        nestPad: 36,
+        iterations: 1000,
+        minimizeIterations: 100,
+      },
     );
+
+    expect(result.violations).toEqual([]);
+    const hub = nodes[indexById.get("hub") as number];
+    const n1 = nodes[indexById.get("n1") as number];
+    const n3 = nodes[indexById.get("n3") as number];
+    expect(n1.y).toBeLessThan(hub.y - 1);
+    expect(n3.x).toBeLessThan(hub.x - 1);
   });
 
   it("solves bookstore UC2 with merged multiline edge labels", () => {

@@ -1449,6 +1449,9 @@ export function solveLayout(
       containerIds: ctx.boundaries
         .filter((boundary) => !boundary.parent)
         .map((boundary) => boundary.id),
+      drawnContainerIds: ctx.boundaries
+        .filter((boundary) => boundary.draw !== false)
+        .map((boundary) => boundary.id),
       containerRect: (id) => rectFromMembers(ctx, id),
       setContainerAxis: (id, axis, value) => {
         const rect = rectFromMembers(ctx, id);

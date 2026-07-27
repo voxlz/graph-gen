@@ -27,17 +27,4 @@ edges {
 }
 
 constraints {
-    // provider group to the right of the VPC
-    providers right vpc
-
-    // stores next to the API
-    cache right api
-    cache top tsdb
-
-    // client and attacker to the left
-    client left api
-    attacker left client
-
-    // providers stacked
-    noaa top satellite
 }

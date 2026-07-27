@@ -1,4 +1,5 @@
 import { minimizeLayout } from "../src/minimize";
+import { angularRelaxationScore } from "../src/strategies/angular-relaxation";
 import { compactness } from "../src/strategies/shared";
 import { createStrategyCase } from "./strategies/fixture";
 
@@ -17,7 +18,7 @@ test("minimizeLayout keeps valid improvements from its strategy cycle", () => {
 });
 
 test("minimizeLayout does no work when the generation limit is zero", () => {
-  const strategyCase = createStrategyCase("shared-neighbor-spread");
+  const strategyCase = createStrategyCase("angular-relaxation");
   const before = strategyCase.options.nodes.map(({ x, y }) => ({ x, y }));
   strategyCase.options.generations = 0;
 
@@ -27,4 +28,16 @@ test("minimizeLayout does no work when the generation limit is zero", () => {
     before,
   );
   expect(strategyCase.frames).toEqual([]);
+});
+
+test("minimizeLayout retains angular relaxation through its strategy cycle", () => {
+  const strategyCase = createStrategyCase("angular-relaxation");
+  const before = angularRelaxationScore(strategyCase.options.edges);
+
+  minimizeLayout(strategyCase.options);
+
+  expect(angularRelaxationScore(strategyCase.options.edges)).toBeLessThan(
+    before,
+  );
+  expect(strategyCase.options.isValid(true)).toBe(true);
 });

@@ -14,8 +14,6 @@ nodes {
 
     // the remaining constraint types, shown to the right of the compass
     group extras {
-        circle hub: "Hub"
-        box orbit: "near"
         box rowA: "align row"
         box rowB: "align row"
         box colA: "align col"
@@ -32,7 +30,6 @@ edges {
     center --- nw
     center --- se
     center --- sw
-    hub --- orbit
     rowA --- rowB
     colA --- colB
 }
@@ -51,9 +48,6 @@ constraints {
     // place the extras cluster to the right of the whole compass
     compass left extras
 
-    // near: pulls a node close to another
-    orbit near hub
-
     // align row: keeps nodes on a shared horizontal line
     rowA left rowB
     align row rowA rowB
@@ -63,6 +57,5 @@ constraints {
     align col colA colB
 
     // stack the three extra demos vertically
-    hub top rowA
     rowB top colA
 }

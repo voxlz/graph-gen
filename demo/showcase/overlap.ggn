@@ -36,5 +36,4 @@ constraints {
     n3 bottom hub
     n4 bottom n3
     wide right n6
-    tiny bottom wide
 }

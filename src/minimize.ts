@@ -3,7 +3,12 @@ import { minimizeTowardCenter } from "./strategies/center";
 import { minimizeDisconnectedPerimeter } from "./strategies/disconnected-perimeter";
 import { minimizeEdgeLengths } from "./strategies/edge-shortening";
 import { minimizeNodeSwaps } from "./strategies/node-swap";
-import { minimizeSharedNeighborSpread } from "./strategies/shared-neighbor-spread";
+import { minimizeSharedHubCompaction } from "./strategies/shared-hub-compaction";
+import {
+  ANGULAR_IMPROVEMENT_EPSILON,
+  angularRelaxationScore,
+  minimizeAngularRelaxation,
+} from "./strategies/angular-relaxation";
 import {
   compactness,
   compareByKeys,
@@ -23,6 +28,7 @@ export function minimizeLayout(options: MinimizeOptions): void {
     const baselineMeasure = options.measure();
     if (!baselineMeasure) return;
     const baselineScore = compactness(baselineMeasure);
+    const baselineAngularScore = angularRelaxationScore(options.edges);
     const baselinePositions = snapshot(options.nodes);
     const cycleFrames: StrategyFrame[] = [];
     const cycleOptions: MinimizeOptions = {
@@ -37,24 +43,36 @@ export function minimizeLayout(options: MinimizeOptions): void {
       return;
     }
     const maximumArea = compactness(stagesMeasure).area * 1.05;
+    minimizeAngularRelaxation(cycleOptions, maximumArea);
+    minimizeSharedHubCompaction(cycleOptions, maximumArea);
     minimizeEdgeLengths(cycleOptions, maximumArea);
     minimizeBlockerEscapes(cycleOptions, maximumArea);
     minimizeNodeSwaps(cycleOptions, maximumArea);
-    minimizeSharedNeighborSpread(cycleOptions, maximumArea);
     minimizeDisconnectedPerimeter(cycleOptions, maximumArea);
 
     const candidateMeasure = options.measure();
     const candidateScore = candidateMeasure
       ? compactness(candidateMeasure)
       : null;
+    const compactnessComparison = candidateScore
+      ? compareByKeys(candidateScore, baselineScore, [
+          "area",
+          "perimeter",
+          "largestDimension",
+          "edgeLength",
+        ])
+      : null;
+    const candidateAngularScore = angularRelaxationScore(options.edges);
+    const angularImproved =
+      candidateAngularScore <
+      baselineAngularScore - ANGULAR_IMPROVEMENT_EPSILON;
+    const angularNotWorse =
+      candidateAngularScore <=
+      baselineAngularScore + ANGULAR_IMPROVEMENT_EPSILON;
     if (
-      candidateScore &&
-      compareByKeys(candidateScore, baselineScore, [
-        "area",
-        "perimeter",
-        "largestDimension",
-        "edgeLength",
-      ]) < 0
+      compactnessComparison !== null &&
+      ((compactnessComparison < 0 && angularNotWorse) ||
+        (compactnessComparison === 0 && angularImproved))
     ) {
       for (const frame of cycleFrames) options.onIteration?.(frame);
       continue;

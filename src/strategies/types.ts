@@ -45,6 +45,7 @@ export interface MinimizeOptions {
   generations: number;
   setNodeAxis?: (node: LayoutNode, axis: "x" | "y", value: number) => void;
   containerIds?: string[];
+  drawnContainerIds?: string[];
   containerRect?: (id: string) => MinimizeRect | null;
   setContainerAxis?: (id: string, axis: "x" | "y", value: number) => void;
   obstacles: () => MinimizeObstacle[];

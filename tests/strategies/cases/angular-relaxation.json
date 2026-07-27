@@ -1,0 +1,48 @@
+{
+  "name": "angular-relaxation",
+  "nodeGap": 20,
+  "generations": 5,
+  "viewport": { "minX": -280, "minY": -280, "maxX": 280, "maxY": 280 },
+  "nodes": [
+    {
+      "id": "hub",
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "canvas"
+    },
+    {
+      "id": "a",
+      "x": 169.1447,
+      "y": -61.5636,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "canvas"
+    },
+    {
+      "id": "b",
+      "x": 180,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "canvas"
+    },
+    {
+      "id": "free",
+      "x": 169.1447,
+      "y": 61.5636,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "canvas"
+    }
+  ],
+  "edges": [
+    ["hub", "a"],
+    ["hub", "b"],
+    ["hub", "free"]
+  ],
+  "boundaries": [
+    { "id": "canvas", "minX": -250, "minY": -250, "maxX": 250, "maxY": 250 }
+  ]
+}

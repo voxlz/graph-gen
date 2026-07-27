@@ -4,7 +4,7 @@ Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https:
 
 ## Example
 
-![Checkout example](docs/example.png)
+![Checkout example](renders/demo/showcase/example.png)
 
 ```text
 // optional per-graph style overrides (here, a light fill for circles).
@@ -106,7 +106,7 @@ docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style
 
 Declare nodes. These are the elements that will make up your graph:
 
-![Node shapes](docs/shapes.png)
+![Node shapes](renders/demo/showcase/example.png)
 
 ```text
 nodes {
@@ -127,7 +127,7 @@ nodes {
 
 Connect nodes together with edges:
 
-![Edge connectors](docs/edges.png)
+![Edge connectors](renders/demo/showcase/edges.png)
 
 ```text
 edges {
@@ -146,7 +146,7 @@ edges {
 
 Apply alignment constraints and relationships between your nodes to force graph to look a certain way:
 
-![Constraints](docs/compass.png)
+![Constraints](renders/demo/showcase/compass.png)
 
 ```text
 constraints {
@@ -212,8 +212,10 @@ after finding a valid layout.
 `src/minimize.ts` runs the fixed-point minimization cycle and rolls back a cycle
 that does not improve the result. The implementations live in
 `src/strategies/`: center compaction, edge shortening, blocker escape,
-same-container swaps, equal-radius spreading for blocked neighbors of a shared
-hub, and disconnected-node perimeter relocation.
+same-container swaps, angular relaxation of edges around shared hubs, and
+disconnected-node perimeter relocation.
+Angular relaxation tries radial and single-axis nudges independently, allowing
+nodes with directional constraints to spread along their unconstrained axis.
 Candidate moves are accepted only through the layout solver's validation and
 measurement callbacks, so minimization cannot weaken or bypass layout
 requirements.
