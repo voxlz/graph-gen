@@ -168,6 +168,7 @@ function alignedNodes(
 }
 
 const EPSILON = 0.01;
+const NODE_EDGE_CLEARANCE = 8;
 
 function rectanglesOverlap(a: LayoutRect, b: LayoutRect): boolean {
   return (
@@ -831,13 +832,14 @@ function resolveNodeEdgeIntersections(ctx: LayoutContext) {
     for (let index = 0; index < ctx.nodes.length; index++) {
       if (index === source || index === target) continue;
       const node = ctx.nodes[index];
-      if (!segmentIntersectsRect(segment, nodeRect(node, 2))) continue;
+      if (!segmentIntersectsRect(segment, nodeRect(node, NODE_EDGE_CLEARANCE)))
+        continue;
       const distance = signedDistance(node, segment);
       const projectedHalfExtent =
         Math.abs(normal.x) * (node.width / 2) +
         Math.abs(normal.y) * (node.height / 2);
       const movement = Math.max(
-        projectedHalfExtent + ctx.options.nodeGap / 2 - Math.abs(distance) + 2,
+        projectedHalfExtent + Math.abs(distance) + NODE_EDGE_CLEARANCE,
         4,
       );
       const preferredDirection =
@@ -881,7 +883,11 @@ function resolveNodeEdgeIntersections(ctx: LayoutContext) {
             })),
           ),
         ],
-        () => !segmentIntersectsRect(edgeSegment(edge, ctx), nodeRect(node, 2)),
+        () =>
+          !segmentIntersectsRect(
+            edgeSegment(edge, ctx),
+            nodeRect(node, NODE_EDGE_CLEARANCE),
+          ),
       );
     }
   }
@@ -1196,7 +1202,12 @@ function collectViolations(
     const segment = edgeSegment(edge, ctx);
     for (let index = 0; index < ctx.nodes.length; index++) {
       if (index === source || index === target) continue;
-      if (segmentIntersectsRect(segment, nodeRect(ctx.nodes[index], 2))) {
+      if (
+        segmentIntersectsRect(
+          segment,
+          nodeRect(ctx.nodes[index], NODE_EDGE_CLEARANCE),
+        )
+      ) {
         add(`edge ${edgeIndex + 1} intersects node ${ctx.nodes[index].id}`);
       }
     }
