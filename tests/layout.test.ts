@@ -93,6 +93,34 @@ function properSegmentsCross(
 }
 
 describe("solveLayout", () => {
+  it("keeps row and column constraints on matching coordinates", () => {
+    const parsed = parseGraphText(`nodes {
+  box a
+  box b
+  box c
+  box d
+}
+constraints {
+  align row a d
+  align col b c
+}`);
+    expect(parsed.errors).toEqual([]);
+    const nodes = parsed.spec.nodes.map(bookstoreNode);
+
+    const result = solveLayout(
+      nodes,
+      parsed.spec.boundaries,
+      [],
+      parsed.spec.constraints,
+      { ...options, minimizeIterations: 0 },
+    );
+
+    expect(result.violations).toEqual([]);
+    const nodeById = new Map(nodes.map((current) => [current.id, current]));
+    expect(nodeById.get("a")!.y).toBeCloseTo(nodeById.get("d")!.y, 8);
+    expect(nodeById.get("b")!.x).toBeCloseTo(nodeById.get("c")!.x, 8);
+  });
+
   it("minimizes disconnected nodes to their exact clearance", () => {
     const baselineNodes = [node("wide", 400, 60), node("small", 40, 60)];
     solveLayout(baselineNodes, [], [], [], {

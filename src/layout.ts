@@ -40,6 +40,8 @@ interface LayoutRect {
 
 export interface LayoutConstraint {
   type: string;
+  axis?: "x" | "y";
+  ids?: string[];
   a?: string;
   b?: string;
   left?: string;
@@ -93,6 +95,7 @@ interface LayoutContext {
   nodeIndex: Map<LayoutNode, number>;
   boundaryById: Map<string, LayoutBoundary>;
   members: Map<string, number[]>;
+  alignments: Record<"x" | "y", LayoutNode[][]>;
   maxDepth: number;
 }
 
@@ -127,18 +130,41 @@ function translateEntities(
   dx: number,
   dy: number,
 ) {
-  const movingNodes = new Set<LayoutNode>();
+  const movingNodes = nodesForEntities(ctx, ids);
+  const xNodes = alignedNodes(ctx, movingNodes, "x");
+  const yNodes = alignedNodes(ctx, movingNodes, "y");
+  if (dx !== 0) {
+    for (const node of xNodes) node.x += dx;
+  }
+  if (dy !== 0) {
+    for (const node of yNodes) node.y += dy;
+  }
+}
+
+function nodesForEntities(ctx: LayoutContext, ids: string[]): Set<LayoutNode> {
+  const result = new Set<LayoutNode>();
   for (const id of ids) {
     const node = ctx.nodeById.get(id);
-    if (node) movingNodes.add(node);
+    if (node) result.add(node);
     for (const index of ctx.members.get(id) ?? []) {
-      movingNodes.add(ctx.nodes[index]);
+      result.add(ctx.nodes[index]);
     }
   }
-  for (const node of movingNodes) {
-    node.x += dx;
-    node.y += dy;
+  return result;
+}
+
+function alignedNodes(
+  ctx: LayoutContext,
+  nodes: Set<LayoutNode>,
+  axis: "x" | "y",
+): Set<LayoutNode> {
+  const result = new Set(nodes);
+  for (const alignment of ctx.alignments[axis]) {
+    if (alignment.some((node) => result.has(node))) {
+      for (const node of alignment) result.add(node);
+    }
   }
+  return result;
 }
 
 const EPSILON = 0.01;
@@ -329,6 +355,15 @@ function translateEntity(
   dx: number,
   dy: number,
 ) {
+  translateEntities(ctx, [id], dx, dy);
+}
+
+function translateEntityRaw(
+  ctx: LayoutContext,
+  id: string,
+  dx: number,
+  dy: number,
+) {
   const node = ctx.nodeById.get(id);
   if (node) {
     node.x += dx;
@@ -442,10 +477,20 @@ function initializeGrid(ctx: LayoutContext) {
       const targetX = (column - (columns - 1) / 2) * cellWidth;
       const targetY = (row - (rows - 1) / 2) * cellHeight;
       const center = rectCenter(item.rect);
-      translateEntity(ctx, item.id, targetX - center.x, targetY - center.y);
+      translateEntityRaw(ctx, item.id, targetX - center.x, targetY - center.y);
     }
   };
   layoutContainer(null);
+}
+
+function resolveAlignmentConstraints(ctx: LayoutContext) {
+  for (const axis of ["x", "y"] as const) {
+    for (const nodes of ctx.alignments[axis]) {
+      const coordinate =
+        nodes.reduce((sum, node) => sum + node[axis], 0) / nodes.length;
+      for (const node of nodes) node[axis] = coordinate;
+    }
+  }
 }
 
 function directionalCorrection(
@@ -743,7 +788,12 @@ function chooseBestMove(
 
 function violationScore(messages: string[]): number {
   return messages.reduce((score, message) => {
-    if (message.startsWith("directional constraint")) return score + 1_000_000;
+    if (
+      message.startsWith("directional constraint") ||
+      message.startsWith("alignment constraint")
+    ) {
+      return score + 1_000_000;
+    }
     if (
       message.startsWith("node clearance") ||
       message.startsWith("group overlap") ||
@@ -1060,6 +1110,16 @@ function collectViolations(
   const add = (message: string) => {
     if (messages.length < 50) messages.push(message);
   };
+  for (const axis of ["x", "y"] as const) {
+    for (const nodes of ctx.alignments[axis]) {
+      const coordinate = nodes[0][axis];
+      if (nodes.some((node) => Math.abs(node[axis] - coordinate) > EPSILON)) {
+        add(
+          `alignment constraint ${axis} ${nodes.map((node) => node.id).join(" / ")}`,
+        );
+      }
+    }
+  }
   for (const constraint of ctx.constraints) {
     if (constraint.type === "near" || constraint.type === "align") continue;
     const aId = constraint.a ?? constraint.left ?? constraint.top;
@@ -1198,13 +1258,39 @@ function makeContext(
     nodeIndex: new Map(nodes.map((node, index) => [node, index])),
     boundaryById,
     members,
+    alignments: { x: [], y: [] },
     maxDepth: 0,
   };
+  ctx.alignments.x = alignmentComponents(ctx, "x");
+  ctx.alignments.y = alignmentComponents(ctx, "y");
   ctx.maxDepth = boundaries.reduce(
     (maximum, boundary) => Math.max(maximum, boundaryDepth(ctx, boundary.id)),
     0,
   );
   return ctx;
+}
+
+function alignmentComponents(
+  ctx: LayoutContext,
+  axis: "x" | "y",
+): LayoutNode[][] {
+  const components: Array<Set<LayoutNode>> = [];
+  for (const constraint of ctx.constraints) {
+    if (constraint.type !== "align" || constraint.axis !== axis) continue;
+    const nodes = nodesForEntities(ctx, constraint.ids ?? []);
+    if (nodes.size < 2) continue;
+    const connected = components.filter((component) =>
+      [...nodes].some((node) => component.has(node)),
+    );
+    for (const component of connected) {
+      for (const node of component) nodes.add(node);
+      components.splice(components.indexOf(component), 1);
+    }
+    components.push(nodes);
+  }
+  return components.map((component) =>
+    [...component].sort((a, b) => a.id.localeCompare(b.id)),
+  );
 }
 
 function captureSnapshot(
@@ -1296,6 +1382,7 @@ export function solveLayout(
   let iteration = 0;
   const stableTarget = Math.max(1, options.stableIterations ?? 3);
   for (iteration = 1; iteration <= options.iterations; iteration++) {
+    resolveAlignmentConstraints(ctx);
     resolveDirectionalConstraints(ctx);
     resolveNodeOverlaps(ctx);
     resolveBoundaryOverlaps(ctx);

@@ -167,6 +167,9 @@ constraints {
 }
 ```
 
+`align row` requires every listed node to have the same y coordinate, while
+`align col` requires the same x coordinate.
+
 **Constraints and alignments can target a whole group or boundary, not just
 single nodes** — the id expands to all its members, so one rule places or aligns
 an entire cluster (e.g. `core right api` puts the whole `core` group to the right
