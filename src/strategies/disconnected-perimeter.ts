@@ -1,6 +1,7 @@
 import type { LayoutNode } from "../layout";
 import {
   compactness,
+  compareByKeys,
   emitIteration,
   EPSILON,
   restore,
@@ -81,6 +82,7 @@ export function minimizeDisconnectedPerimeter(
   if (!baselineMeasure) return false;
   const baselinePositions = snapshot(options.nodes);
   let bestScore = compactness(baselineMeasure);
+  let bestElementArea = options.elementAreaScore?.();
   let bestPositions: ReturnType<typeof snapshot> | null = null;
 
   for (const node of disconnected) {
@@ -91,17 +93,24 @@ export function minimizeDisconnectedPerimeter(
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
       const candidateScore = compactness(candidateMeasure);
+      const candidateElementArea = options.elementAreaScore?.();
+      const compactnessComparison = compareByKeys(candidateScore, bestScore, [
+        "area",
+        "perimeter",
+        "largestDimension",
+      ]);
+      const elementAreaComparison =
+        candidateElementArea !== undefined && bestElementArea !== undefined
+          ? candidateElementArea - bestElementArea
+          : 0;
       if (
         candidateScore.area <= maximumArea + EPSILON &&
-        (candidateScore.area < bestScore.area - EPSILON ||
-          (Math.abs(candidateScore.area - bestScore.area) <= EPSILON &&
-            (candidateScore.perimeter < bestScore.perimeter - EPSILON ||
-              (Math.abs(candidateScore.perimeter - bestScore.perimeter) <=
-                EPSILON &&
-                candidateScore.largestDimension <
-                  bestScore.largestDimension - EPSILON))))
+        (elementAreaComparison < -EPSILON ||
+          (Math.abs(elementAreaComparison) <= EPSILON &&
+            compactnessComparison < 0))
       ) {
         bestScore = candidateScore;
+        bestElementArea = candidateElementArea;
         bestPositions = snapshot(options.nodes);
       }
     }

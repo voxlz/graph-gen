@@ -45,9 +45,17 @@ export interface MinimizeOptions {
   generations: number;
   setNodeAxis?: (node: LayoutNode, axis: "x" | "y", value: number) => void;
   containerIds?: string[];
-  drawnContainerIds?: string[];
+  swappableContainerIds?: string[];
+  containerParent?: (id: string) => string | null;
   containerRect?: (id: string) => MinimizeRect | null;
   setContainerAxis?: (id: string, axis: "x" | "y", value: number) => void;
+  elementAlignmentContainerIds?: Array<string | null>;
+  childEntityIds?: (parent: string | null) => string[];
+  isBoundaryEntity?: (id: string) => boolean;
+  entityRect?: (id: string) => MinimizeRect | null;
+  setEntityAxis?: (id: string, axis: "x" | "y", value: number) => void;
+  regionRect?: (parent: string | null) => MinimizeRect | null;
+  elementAreaScore?: () => number;
   obstacles: () => MinimizeObstacle[];
   isValid: (includeLabels: boolean) => boolean;
   measure: () => MinimizeMeasure | null;

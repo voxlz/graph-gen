@@ -8,6 +8,7 @@ import { minimizeEdgeLengths } from "../../src/strategies/edge-shortening";
 import { minimizeNodeSwaps } from "../../src/strategies/node-swap";
 import { minimizeAngularRelaxation } from "../../src/strategies/angular-relaxation";
 import { minimizeSharedHubCompaction } from "../../src/strategies/shared-hub-compaction";
+import { minimizeElementAlignment } from "../../src/strategies/element-alignment";
 import {
   compactness,
   measureBounds,
@@ -18,7 +19,11 @@ import type {
   MinimizeRect,
   StrategyFrame,
 } from "../../src/strategies/types";
-import { createStrategyCase, type StrategyFixture } from "./fixture";
+import {
+  createStrategyCase,
+  fixtureBoundaryRects,
+  type StrategyFixture,
+} from "./fixture";
 
 const WIDTH = 1200;
 const HEIGHT = 720;
@@ -32,6 +37,8 @@ const STRATEGIES = [
   "angular-relaxation",
   "shared-hub-compaction",
   "node-swap",
+  "node-swap-boundary",
+  "element-alignment",
   "disconnected-perimeter",
 ] as const;
 
@@ -40,10 +47,16 @@ function frameMeasure(
   frame: StrategyFrame,
 ): MinimizeMeasure {
   const nodeById = new Map(frame.nodes.map((node) => [node.id, node]));
+  const frameNodes = frame.nodes.map((node) => ({
+    ...node,
+    boundaryParent:
+      fixture.nodes.find((fixtureNode) => fixtureNode.id === node.id)
+        ?.boundaryParent ?? null,
+  }));
   return {
     rects: [
-      ...frame.nodes.map((node) => nodeRect({ ...node, boundaryParent: null })),
-      ...fixture.boundaries.map((boundary) => ({
+      ...frameNodes.map((node) => nodeRect(node)),
+      ...fixtureBoundaryRects(fixture, frameNodes).map((boundary) => ({
         minX: boundary.minX,
         minY: boundary.minY,
         maxX: boundary.maxX,
@@ -110,6 +123,13 @@ function renderFrame(
   const boundsHeight = bounds.maxY - bounds.minY;
   const score = compactness(measure);
   const nodeById = new Map(frame.nodes.map((node) => [node.id, node]));
+  const frameNodes = frame.nodes.map((node) => ({
+    ...node,
+    boundaryParent:
+      fixture.nodes.find((fixtureNode) => fixtureNode.id === node.id)
+        ?.boundaryParent ?? null,
+  }));
+  const boundaries = fixtureBoundaryRects(fixture, frameNodes);
 
   context.fillStyle = "#f7f4ed";
   context.fillRect(0, 0, WIDTH, HEIGHT);
@@ -145,7 +165,7 @@ function renderFrame(
   context.lineWidth = 2;
   context.strokeStyle = "#3f7d78";
   context.fillStyle = "#dcebe5";
-  for (const boundary of fixture.boundaries) {
+  for (const boundary of boundaries) {
     context.fillRect(
       map.x(boundary.minX),
       map.y(boundary.minY),
@@ -219,8 +239,10 @@ function runStrategy(name: (typeof STRATEGIES)[number]): void {
     minimizeAngularRelaxation(strategyCase.options, baseline.area * 1.05);
   } else if (name === "shared-hub-compaction") {
     minimizeSharedHubCompaction(strategyCase.options, baseline.area * 1.05);
-  } else if (name === "node-swap") {
+  } else if (name === "node-swap" || name === "node-swap-boundary") {
     minimizeNodeSwaps(strategyCase.options, baseline.area * 1.05);
+  } else if (name === "element-alignment") {
+    minimizeElementAlignment(strategyCase.options);
   } else {
     minimizeDisconnectedPerimeter(strategyCase.options, baseline.area * 1.05);
   }

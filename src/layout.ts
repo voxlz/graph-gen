@@ -305,6 +305,19 @@ function allGroupRects(ctx: LayoutContext): Map<string, LayoutRect> {
   return result;
 }
 
+function boundsOfRects(rects: LayoutRect[]): LayoutRect | null {
+  if (rects.length === 0) return null;
+  return rects.reduce<LayoutRect>(
+    (bounds, rect) => ({
+      minX: Math.min(bounds.minX, rect.minX),
+      minY: Math.min(bounds.minY, rect.minY),
+      maxX: Math.max(bounds.maxX, rect.maxX),
+      maxY: Math.max(bounds.maxY, rect.maxY),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
+}
+
 function boundaryDepth(ctx: LayoutContext, boundaryId: string): number {
   let depth = 0;
   let current = ctx.boundaryById.get(boundaryId);
@@ -622,6 +635,28 @@ function directionalRelation(
 }
 
 function resolveNodeOverlaps(ctx: LayoutContext) {
+  const packAlignment = (nodes: LayoutNode[], axis: "x" | "y"): void => {
+    const size = axis === "x" ? "width" : "height";
+    const ordered = [...nodes].sort(
+      (a, b) => a[axis] - b[axis] || a.id.localeCompare(b.id),
+    );
+    let trailing = ordered[0][axis] + ordered[0][size] / 2;
+    for (const node of ordered.slice(1)) {
+      const minimum = trailing + ctx.options.nodeGap + node[size] / 2;
+      if (node[axis] < minimum - EPSILON) {
+        translateEntities(
+          ctx,
+          [node.id],
+          axis === "x" ? minimum - node[axis] : 0,
+          axis === "y" ? minimum - node[axis] : 0,
+        );
+      }
+      trailing = node[axis] + node[size] / 2;
+    }
+  };
+  for (const nodes of ctx.alignments.x) packAlignment(nodes, "y");
+  for (const nodes of ctx.alignments.y) packAlignment(nodes, "x");
+
   const padding = ctx.options.nodeGap / 2;
   for (let first = 0; first < ctx.nodes.length; first++) {
     for (let second = first + 1; second < ctx.nodes.length; second++) {
@@ -1436,6 +1471,64 @@ export function solveLayout(
       0,
       Math.floor(options.minimizeIterations ?? 100),
     );
+    const directEntityIds = (parent: string | null) => [
+      ...ctx.nodes
+        .filter((node) => node.boundaryParent === parent)
+        .map((node) => node.id),
+      ...ctx.boundaries
+        .filter((boundary) => (boundary.parent ?? null) === parent)
+        .map((boundary) => boundary.id),
+    ];
+    const minimizeEntityRect = (id: string) => {
+      const node = ctx.nodeById.get(id);
+      return node ? nodeRect(node) : rectFromMembers(ctx, id);
+    };
+    const minimizeRegionRect = (parent: string | null) =>
+      parent === null
+        ? boundsOfRects(
+            directEntityIds(null).flatMap((id) => {
+              const rect = minimizeEntityRect(id);
+              return rect ? [rect] : [];
+            }),
+          )
+        : rectFromMembers(ctx, parent);
+    const drawnBoundaryIds = ctx.boundaries
+      .filter((boundary) => boundary.draw !== false)
+      .map((boundary) => boundary.id)
+      .sort(
+        (a, b) =>
+          boundaryDepth(ctx, b) - boundaryDepth(ctx, a) || a.localeCompare(b),
+      );
+    const elementAlignmentContainerIds: Array<string | null> = [
+      ...drawnBoundaryIds,
+      null,
+    ];
+    const elementAreaScore = () =>
+      drawnBoundaryIds.reduce((total, parent) => {
+        const rect = minimizeRegionRect(parent);
+        return rect
+          ? total + (rect.maxX - rect.minX) * (rect.maxY - rect.minY)
+          : total;
+      }, 0);
+    const setMinimizeEntityAxis = (
+      id: string,
+      axis: "x" | "y",
+      value: number,
+    ) => {
+      const rect = minimizeEntityRect(id);
+      if (!rect) return;
+      const center =
+        axis === "x"
+          ? (rect.minX + rect.maxX) / 2
+          : (rect.minY + rect.maxY) / 2;
+      const delta = value - center;
+      translateEntity(
+        ctx,
+        id,
+        axis === "x" ? delta : 0,
+        axis === "y" ? delta : 0,
+      );
+    };
     minimizeLayout({
       nodes: ctx.nodes,
       edges: ctx.edges.map((edge) => {
@@ -1460,9 +1553,8 @@ export function solveLayout(
       containerIds: ctx.boundaries
         .filter((boundary) => !boundary.parent)
         .map((boundary) => boundary.id),
-      drawnContainerIds: ctx.boundaries
-        .filter((boundary) => boundary.draw !== false)
-        .map((boundary) => boundary.id),
+      swappableContainerIds: ctx.boundaries.map((boundary) => boundary.id),
+      containerParent: (id) => ctx.boundaryById.get(id)?.parent ?? null,
       containerRect: (id) => rectFromMembers(ctx, id),
       setContainerAxis: (id, axis, value) => {
         const rect = rectFromMembers(ctx, id);
@@ -1479,6 +1571,17 @@ export function solveLayout(
           axis === "y" ? delta : 0,
         );
       },
+      ...(drawnBoundaryIds.length > 0
+        ? {
+            elementAlignmentContainerIds,
+            childEntityIds: directEntityIds,
+            isBoundaryEntity: (id: string) => ctx.boundaryById.has(id),
+            entityRect: minimizeEntityRect,
+            setEntityAxis: setMinimizeEntityAxis,
+            regionRect: minimizeRegionRect,
+            elementAreaScore,
+          }
+        : {}),
       obstacles: () => minimizationObstacles(ctx),
       isValid: (includeLabels) =>
         collectViolations(ctx, includeLabels).messages.length === 0,

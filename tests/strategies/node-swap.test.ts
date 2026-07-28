@@ -1,6 +1,6 @@
 import { minimizeNodeSwaps } from "../../src/strategies/node-swap";
-import { compactness } from "../../src/strategies/shared";
-import { createStrategyCase } from "./fixture";
+import { compactness, nodeRect } from "../../src/strategies/shared";
+import { createStrategyCase, fixtureBoundaryRects } from "./fixture";
 
 test("node-swap strategy atomically swaps peers in the same container", () => {
   const strategyCase = createStrategyCase("node-swap");
@@ -39,5 +39,43 @@ test("node-swap strategy swaps peers across different containers", () => {
 
   const after = compactness(strategyCase.options.measure()!);
   expect(after.edgeLength).toBeLessThan(before.edgeLength);
+  expect(strategyCase.options.isValid(true)).toBe(true);
+});
+
+test("node-swap strategy swaps a node with a sibling boundary", () => {
+  const strategyCase = createStrategyCase("node-swap-boundary");
+  const before = compactness(strategyCase.options.measure()!);
+  const beforeNode = strategyCase.options.nodes.find(
+    (node) => node.id === "attacker",
+  )!;
+  const beforeBoundary = fixtureBoundaryRects(
+    strategyCase.fixture,
+    strategyCase.options.nodes,
+  ).find((boundary) => boundary.id === "inner")!;
+  const beforeExtent = {
+    minY: Math.min(nodeRect(beforeNode).minY, beforeBoundary.minY),
+    maxY: Math.max(nodeRect(beforeNode).maxY, beforeBoundary.maxY),
+  };
+
+  expect(minimizeNodeSwaps(strategyCase.options, before.area)).toBe(true);
+
+  const nodeById = new Map(
+    strategyCase.options.nodes.map((node) => [node.id, node]),
+  );
+  expect(nodeById.get("attacker")?.y).toBe(640);
+  expect(nodeById.get("node2")?.y).toBe(290);
+  expect(nodeById.get("node3")?.y).toBe(390);
+  const afterNode = nodeById.get("attacker")!;
+  const afterBoundary = fixtureBoundaryRects(
+    strategyCase.fixture,
+    strategyCase.options.nodes,
+  ).find((boundary) => boundary.id === "inner")!;
+  expect({
+    minY: Math.min(nodeRect(afterNode).minY, afterBoundary.minY),
+    maxY: Math.max(nodeRect(afterNode).maxY, afterBoundary.maxY),
+  }).toEqual(beforeExtent);
+  expect(strategyCase.options.measure()!.edgeLength).toBeLessThan(
+    before.edgeLength,
+  );
   expect(strategyCase.options.isValid(true)).toBe(true);
 });
