@@ -2,7 +2,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/**", "renders/**"],
+    ignores: ["node_modules/**", "renders/**", "release-artifacts/**"],
   },
   ...tseslint.configs.recommended,
   {
