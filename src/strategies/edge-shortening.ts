@@ -9,6 +9,9 @@ import {
   compareByKeys,
   emitIteration,
   EPSILON,
+  expandRect,
+  nodeRect,
+  rectanglesOverlap,
   restore,
   setNodeAxis,
   snapshot,
@@ -20,6 +23,19 @@ interface EdgeCandidate {
   axis: "x" | "y";
   value: number;
   key: string;
+}
+
+function hasNodeClearanceViolation(options: MinimizeOptions): boolean {
+  const padding = options.nodeGap / 2;
+  const rects = options.nodes.map((node) =>
+    expandRect(nodeRect(node), padding),
+  );
+  for (let first = 0; first < rects.length; first++) {
+    for (let second = first + 1; second < rects.length; second++) {
+      if (rectanglesOverlap(rects[first], rects[second])) return true;
+    }
+  }
+  return false;
 }
 
 function edgeCandidates(options: MinimizeOptions): EdgeCandidate[] {
@@ -69,6 +85,7 @@ export function minimizeEdgeLengths(
     for (const candidate of edgeCandidates(options)) {
       restore(options.nodes, baselinePositions);
       setNodeAxis(options, candidate.node, candidate.axis, candidate.value);
+      if (hasNodeClearanceViolation(options)) continue;
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
       const candidateScore = compactness(candidateMeasure);
