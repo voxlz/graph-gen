@@ -41,3 +41,22 @@ test("minimizeLayout retains angular relaxation through its strategy cycle", () 
   );
   expect(strategyCase.options.isValid(true)).toBe(true);
 });
+
+test("minimizeLayout runs node and boundary swaps before geometry stages", () => {
+  const strategyCase = createStrategyCase("node-swap-boundary");
+
+  minimizeLayout(strategyCase.options);
+
+  expect(strategyCase.frames[0]?.strategy).toBe("node-swap");
+  expect(strategyCase.options.isValid(true)).toBe(true);
+});
+
+test("minimizeLayout never increases aggregate element area", () => {
+  const strategyCase = createStrategyCase("element-alignment");
+  const before = strategyCase.options.elementAreaScore!();
+
+  minimizeLayout(strategyCase.options);
+
+  expect(strategyCase.options.elementAreaScore!()).toBeLessThanOrEqual(before);
+  expect(strategyCase.options.isValid(true)).toBe(true);
+});

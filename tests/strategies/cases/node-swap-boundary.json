@@ -1,0 +1,62 @@
+{
+  "name": "node-swap-boundary",
+  "nodeGap": 40,
+  "generations": 1,
+  "viewport": { "minX": -350, "minY": -100, "maxX": 350, "maxY": 780 },
+  "nodes": [
+    {
+      "id": "node1",
+      "x": -60,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    },
+    {
+      "id": "attacker",
+      "x": 100,
+      "y": 250,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "outer"
+    },
+    {
+      "id": "node2",
+      "x": -60,
+      "y": 500,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "inner"
+    },
+    {
+      "id": "node3",
+      "x": 60,
+      "y": 600,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "inner"
+    }
+  ],
+  "edges": [["node1", "node2"]],
+  "boundaries": [
+    {
+      "id": "outer",
+      "parent": null,
+      "minX": -220,
+      "minY": 120,
+      "maxX": 220,
+      "maxY": 700
+    },
+    {
+      "id": "inner",
+      "parent": "outer",
+      "minX": -140,
+      "minY": 430,
+      "maxX": 140,
+      "maxY": 670,
+      "dynamic": true,
+      "padding": 40,
+      "swappable": true
+    }
+  ]
+}

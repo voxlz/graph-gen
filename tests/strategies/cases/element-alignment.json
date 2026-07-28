@@ -1,0 +1,69 @@
+{
+  "name": "element-alignment",
+  "nodeGap": 40,
+  "generations": 3,
+  "viewport": { "minX": -500, "minY": -350, "maxX": 500, "maxY": 850 },
+  "nodes": [
+    {
+      "id": "client",
+      "x": -300,
+      "y": 0,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": null
+    },
+    {
+      "id": "internet-attacker",
+      "x": 300,
+      "y": -180,
+      "width": 100,
+      "height": 90,
+      "boundaryParent": null
+    },
+    {
+      "id": "router",
+      "x": -120,
+      "y": 420,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "lan"
+    },
+    {
+      "id": "camera",
+      "x": 100,
+      "y": 560,
+      "width": 80,
+      "height": 60,
+      "boundaryParent": "lan"
+    },
+    {
+      "id": "attacker",
+      "x": -20,
+      "y": 720,
+      "width": 100,
+      "height": 90,
+      "boundaryParent": "lan"
+    }
+  ],
+  "edges": [],
+  "directions": [
+    {
+      "type": "right",
+      "a": "internet-attacker",
+      "b": "client"
+    }
+  ],
+  "boundaries": [
+    {
+      "id": "lan",
+      "parent": null,
+      "minX": -200,
+      "minY": 350,
+      "maxX": 180,
+      "maxY": 805,
+      "dynamic": true,
+      "padding": 40,
+      "elementAlignmentFixed": true
+    }
+  ]
+}

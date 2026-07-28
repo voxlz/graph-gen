@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { LayoutNode } from "../../src/layout";
 import {
   expandRect,
+  measureBounds,
   nodeRect,
   rectanglesOverlap,
 } from "../../src/strategies/shared";
@@ -23,7 +24,16 @@ export interface StrategyFixture {
   nodes: LayoutNode[];
   edges: Array<[string, string]>;
   directions?: MinimizeDirection[];
-  boundaries: Array<MinimizeRect & { id: string }>;
+  boundaries: Array<
+    MinimizeRect & {
+      id: string;
+      parent?: string | null;
+      dynamic?: boolean;
+      padding?: number;
+      swappable?: boolean;
+      elementAlignmentFixed?: boolean;
+    }
+  >;
 }
 
 export interface StrategyCase {
@@ -42,6 +52,47 @@ interface Segment {
   y1: number;
   x2: number;
   y2: number;
+}
+
+function belongsToBoundary(
+  fixture: StrategyFixture,
+  node: LayoutNode,
+  boundaryId: string,
+): boolean {
+  const boundaryById = new Map(
+    fixture.boundaries.map((boundary) => [boundary.id, boundary]),
+  );
+  let current = node.boundaryParent;
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    if (current === boundaryId) return true;
+    seen.add(current);
+    current = boundaryById.get(current)?.parent ?? null;
+  }
+  return false;
+}
+
+export function fixtureBoundaryRects(
+  fixture: StrategyFixture,
+  nodes: LayoutNode[],
+): Array<MinimizeRect & { id: string }> {
+  return fixture.boundaries.flatMap((boundary) => {
+    if (!boundary.dynamic) return [{ ...boundary }];
+    const members = nodes.filter((node) =>
+      belongsToBoundary(fixture, node, boundary.id),
+    );
+    if (members.length === 0) return [];
+    const padding = boundary.padding ?? fixture.nodeGap;
+    return [
+      {
+        id: boundary.id,
+        minX: Math.min(...members.map((node) => nodeRect(node).minX)) - padding,
+        minY: Math.min(...members.map((node) => nodeRect(node).minY)) - padding,
+        maxX: Math.max(...members.map((node) => nodeRect(node).maxX)) + padding,
+        maxY: Math.max(...members.map((node) => nodeRect(node).maxY)) + padding,
+      },
+    ];
+  });
 }
 
 function segmentIntersectsRect(segment: Segment, rect: MinimizeRect): boolean {
@@ -131,10 +182,13 @@ function valid(fixture: StrategyFixture, nodes: LayoutNode[]): boolean {
     }
   }
 
+  const boundaries = fixtureBoundaryRects(fixture, nodes);
   for (const node of nodes) {
     const rect = nodeRect(node);
-    for (const boundary of fixture.boundaries) {
-      if (node.boundaryParent === boundary.id) {
+    for (const definition of fixture.boundaries) {
+      const boundary = boundaries.find(({ id }) => id === definition.id);
+      if (!boundary) continue;
+      if (belongsToBoundary(fixture, node, boundary.id)) {
         if (
           rect.minX < boundary.minX ||
           rect.maxX > boundary.maxX ||
@@ -143,9 +197,9 @@ function valid(fixture: StrategyFixture, nodes: LayoutNode[]): boolean {
         ) {
           return false;
         }
-      } else if (
-        rectanglesOverlap(expandRect(rect, fixture.nodeGap / 2), boundary)
-      ) {
+        continue;
+      }
+      if (rectanglesOverlap(expandRect(rect, fixture.nodeGap / 2), boundary)) {
         return false;
       }
     }
@@ -219,12 +273,50 @@ export function createStrategyCase(name: string): StrategyCase {
     target: nodeById.get(target)!,
   }));
   const frames: StrategyFrame[] = [];
+  const directEntityIds = (parent: string | null) => [
+    ...nodes
+      .filter((node) => node.boundaryParent === parent)
+      .map((node) => node.id),
+    ...fixture.boundaries
+      .filter((boundary) => (boundary.parent ?? null) === parent)
+      .map((boundary) => boundary.id),
+  ];
+  const entityRect = (id: string) => {
+    const node = nodeById.get(id);
+    return (
+      (node ? nodeRect(node) : null) ??
+      fixtureBoundaryRects(fixture, nodes).find(
+        (boundary) => boundary.id === id,
+      ) ??
+      null
+    );
+  };
+  const regionRect = (parent: string | null) =>
+    parent === null
+      ? measureBounds(
+          directEntityIds(null).flatMap((id) => {
+            const rect = entityRect(id);
+            return rect ? [rect] : [];
+          }),
+        )
+      : entityRect(parent);
+  const elementAlignmentContainerIds: Array<string | null> = [
+    ...fixture.boundaries.map((boundary) => boundary.id).reverse(),
+    null,
+  ];
+  const alignmentEntityIds = (parent: string | null) =>
+    directEntityIds(parent).filter(
+      (id) =>
+        !fixture.boundaries.find((boundary) => boundary.id === id)
+          ?.elementAlignmentFixed,
+    );
   const measure = (): MinimizeMeasure | null => {
     if (!valid(fixture, nodes)) return null;
+    const boundaries = fixtureBoundaryRects(fixture, nodes);
     return {
       rects: [
         ...nodes.map((node) => nodeRect(node)),
-        ...fixture.boundaries.map((boundary) => ({
+        ...boundaries.map((boundary) => ({
           minX: boundary.minX,
           minY: boundary.minY,
           maxX: boundary.maxX,
@@ -252,6 +344,66 @@ export function createStrategyCase(name: string): StrategyCase {
       directionalGap: fixture.directionalGap ?? fixture.nodeGap,
       directions: fixture.directions,
       generations: fixture.generations,
+      swappableContainerIds: fixture.boundaries
+        .filter((boundary) => boundary.swappable)
+        .map((boundary) => boundary.id),
+      containerParent: (id) =>
+        fixture.boundaries.find((boundary) => boundary.id === id)?.parent ??
+        null,
+      containerRect: (id) =>
+        fixtureBoundaryRects(fixture, nodes).find(
+          (boundary) => boundary.id === id,
+        ) ?? null,
+      setContainerAxis: (id, axis, value) => {
+        const rect = fixtureBoundaryRects(fixture, nodes).find(
+          (boundary) => boundary.id === id,
+        );
+        if (!rect) return;
+        const center =
+          axis === "x"
+            ? (rect.minX + rect.maxX) / 2
+            : (rect.minY + rect.maxY) / 2;
+        const delta = value - center;
+        for (const node of nodes) {
+          if (belongsToBoundary(fixture, node, id)) node[axis] += delta;
+        }
+      },
+      elementAlignmentContainerIds,
+      childEntityIds: alignmentEntityIds,
+      isBoundaryEntity: (id) =>
+        fixture.boundaries.some((boundary) => boundary.id === id),
+      entityRect,
+      setEntityAxis: (id, axis, value) => {
+        const rect = entityRect(id);
+        if (!rect) return;
+        const center =
+          axis === "x"
+            ? (rect.minX + rect.maxX) / 2
+            : (rect.minY + rect.maxY) / 2;
+        const delta = value - center;
+        const node = nodeById.get(id);
+        if (node) node[axis] += delta;
+        else {
+          if (
+            fixture.boundaries.find((boundary) => boundary.id === id)
+              ?.elementAlignmentFixed
+          ) {
+            return;
+          }
+          for (const member of nodes) {
+            if (belongsToBoundary(fixture, member, id)) member[axis] += delta;
+          }
+        }
+      },
+      regionRect,
+      elementAreaScore: () =>
+        fixture.boundaries.reduce((total, boundary) => {
+          const parent = boundary.id;
+          const rect = regionRect(parent);
+          return rect
+            ? total + (rect.maxX - rect.minX) * (rect.maxY - rect.minY)
+            : total;
+        }, 0),
       obstacles: () => [
         ...nodes.map((node) => ({
           id: node.id,
@@ -259,7 +411,7 @@ export function createStrategyCase(name: string): StrategyCase {
           rect: nodeRect(node),
           node,
         })),
-        ...fixture.boundaries.map(({ id, ...rect }) => ({
+        ...fixtureBoundaryRects(fixture, nodes).map(({ id, ...rect }) => ({
           id,
           kind: "boundary" as const,
           rect,

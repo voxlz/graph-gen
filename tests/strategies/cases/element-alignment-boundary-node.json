@@ -1,0 +1,47 @@
+{
+  "name": "element-alignment-boundary-node",
+  "nodeGap": 40,
+  "generations": 3,
+  "viewport": { "minX": -450, "minY": -200, "maxX": 450, "maxY": 450 },
+  "nodes": [
+    {
+      "id": "anchor",
+      "x": -250,
+      "y": 0,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "internal"
+    },
+    {
+      "id": "service",
+      "x": 250,
+      "y": 260,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "services"
+    }
+  ],
+  "edges": [],
+  "boundaries": [
+    {
+      "id": "internal",
+      "parent": null,
+      "minX": -350,
+      "minY": -100,
+      "maxX": 390,
+      "maxY": 370,
+      "dynamic": true,
+      "padding": 40
+    },
+    {
+      "id": "services",
+      "parent": "internal",
+      "minX": 150,
+      "minY": 190,
+      "maxX": 350,
+      "maxY": 330,
+      "dynamic": true,
+      "padding": 40
+    }
+  ]
+}

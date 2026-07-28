@@ -190,6 +190,31 @@ describe("solveLayout", () => {
     expect(gap).toBeLessThan(101);
   });
 
+  it("aligns bookstore providers to reduce the external boundary", () => {
+    const overrides = {
+      minGap: 100,
+      nodeGap: 100,
+      iterations: 1000,
+    };
+    const baseline = solveGraphFixture(
+      ["demo", "scopes", "bookstore_scope.ggn"],
+      { ...overrides, minimizeIterations: 0 },
+    );
+    const minimized = solveGraphFixture(
+      ["demo", "scopes", "bookstore_scope.ggn"],
+      { ...overrides, minimizeIterations: 100 },
+    );
+    const boundaryArea = (result: typeof minimized.result) => {
+      const rect = result.groups.get("external")!;
+      return (rect.maxX - rect.minX) * (rect.maxY - rect.minY);
+    };
+
+    expect(minimized.result.violations).toEqual([]);
+    expect(boundaryArea(minimized.result)).toBeLessThan(
+      boundaryArea(baseline.result),
+    );
+  });
+
   it("keeps row and column constraints on matching coordinates", () => {
     const parsed = parseGraphText(`nodes {
   box a
@@ -216,6 +241,49 @@ constraints {
     const nodeById = new Map(nodes.map((current) => [current.id, current]));
     expect(nodeById.get("a")!.y).toBeCloseTo(nodeById.get("d")!.y, 8);
     expect(nodeById.get("b")!.x).toBeCloseTo(nodeById.get("c")!.x, 8);
+  });
+
+  it("packs aligned columns without cycling between adjacent overlaps", () => {
+    const parsed = parseGraphText(`nodes {
+  box idp
+  box axisCom
+  box crm
+  box userApi
+  box dsd
+  box pia
+  box mailServer
+  box cdn
+}
+constraints {
+  align col axisCom userApi dsd pia mailServer cdn
+  align col idp crm
+  align row idp axisCom
+  align row crm userApi
+  axisCom top dsd
+  axisCom top userApi
+  userApi top pia
+  userApi top cdn
+  userApi top dsd
+}`);
+    expect(parsed.errors).toEqual([]);
+    const nodes = parsed.spec.nodes.map(bookstoreNode);
+
+    const result = solveLayout(
+      nodes,
+      parsed.spec.boundaries,
+      [],
+      parsed.spec.constraints,
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        iterations: 1000,
+        minimizeIterations: 0,
+      },
+    );
+
+    expect(result.violations).toEqual([]);
+    expect(result.iterations).toBeLessThan(1000);
   });
 
   it("minimizes disconnected nodes to their exact clearance", () => {
@@ -507,6 +575,29 @@ constraints {
     );
     const parsed = parseGraphText(source);
     expect(parsed.errors).toEqual([]);
+    const baselineNodes = parsed.spec.nodes.map(bookstoreNode);
+    const baselineIndexById = new Map(
+      baselineNodes.map((item, index) => [item.id, index]),
+    );
+    solveLayout(
+      baselineNodes,
+      parsed.spec.boundaries,
+      parsed.spec.edges.map((edge) => ({
+        source: baselineIndexById.get(edge.source) as number,
+        target: baselineIndexById.get(edge.target) as number,
+      })),
+      parsed.spec.constraints,
+      {
+        ...options,
+        minGap: 100,
+        nodeGap: 100,
+        boundaryPad: 20,
+        labelBand: 20,
+        nestPad: 36,
+        iterations: 1000,
+        minimizeIterations: 0,
+      },
+    );
     const nodes = parsed.spec.nodes.map(bookstoreNode);
     const indexById = new Map(nodes.map((item, index) => [item.id, index]));
     const edges = parsed.spec.edges.map((edge) => ({
@@ -549,6 +640,23 @@ constraints {
         0,
       );
     expect(totalSpokeLength).toBeLessThan(2000);
+    const footprintArea = (items: LayoutNode[]) => {
+      const bounds = items
+        .map((item) => rect(item))
+        .reduce(
+          (result, current) => ({
+            minX: Math.min(result.minX, current.minX),
+            maxX: Math.max(result.maxX, current.maxX),
+            minY: Math.min(result.minY, current.minY),
+            maxY: Math.max(result.maxY, current.maxY),
+          }),
+          { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+        );
+      return (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+    };
+    expect(footprintArea(nodes)).toBeLessThanOrEqual(
+      footprintArea(baselineNodes),
+    );
   });
 
   it("relaxes constrained overlap spokes along their free axes", () => {
@@ -578,7 +686,7 @@ constraints {
     expect(n3.x).toBeLessThan(hub.x - 1);
   });
 
-  it("solves bookstore UC2 with merged multiline edge labels", () => {
+  it("compacts the disconnected bookstore UC2 cache inside Docker", () => {
     const scope = parseGraphText(
       fs.readFileSync(
         path.join(__dirname, "..", "demo", "scopes", "bookstore_scope.ggn"),
@@ -591,39 +699,146 @@ constraints {
         "utf8",
       ),
     ).spec;
-    const nodes = scope.nodes.map(bookstoreNode);
-    const indexById = new Map(nodes.map((item, index) => [item.id, index]));
-    const edges = prepareEdges(usecase.edges, "{index}. {label}").map(
-      (edge) => {
-        const lines = edge.label.split("\n");
-        return {
-          source: indexById.get(edge.source) as number,
-          target: indexById.get(edge.target) as number,
-          label: edge.label,
-          labelWidth: Math.max(...lines.map((line: string) => textWidth(line))),
-          labelHeight: lines.length * 16,
-        };
-      },
-    );
+    const solve = (minimizeIterations: number) => {
+      const nodes = scope.nodes.map(bookstoreNode);
+      const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+      const edges = prepareEdges(usecase.edges, "{index}. {label}").map(
+        (edge) => {
+          const lines = edge.label.split("\n");
+          return {
+            source: indexById.get(edge.source) as number,
+            target: indexById.get(edge.target) as number,
+            label: edge.label,
+            labelWidth: Math.max(
+              ...lines.map((line: string) => textWidth(line)),
+            ),
+            labelHeight: lines.length * 16,
+          };
+        },
+      );
+      const result = solveLayout(
+        nodes,
+        scope.boundaries,
+        edges,
+        scope.constraints,
+        {
+          ...options,
+          minGap: 100,
+          nodeGap: 100,
+          boundaryPad: 20,
+          labelBand: 20,
+          nestPad: 36,
+          iterations: 1000,
+          minimizeIterations,
+        },
+      );
+      return { nodes, indexById, result };
+    };
+    const baseline = solve(0);
+    const minimized = solve(100);
+    const area = (bounds: ReturnType<typeof rect>) =>
+      (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+    const nodeById = (id: string) =>
+      minimized.nodes[minimized.indexById.get(id)!];
+    const cache = nodeById("cache");
+    const stackTarget = [nodeById("gateway"), nodeById("orders")].sort(
+      (first, second) =>
+        Math.abs(cache.x - first.x) - Math.abs(cache.x - second.x),
+    )[0];
 
-    const result = solveLayout(
-      nodes,
-      scope.boundaries,
-      edges,
-      scope.constraints,
-      {
-        ...options,
-        minGap: 100,
-        nodeGap: 150,
-        boundaryPad: 20,
-        labelBand: 20,
-        nestPad: 36,
-        iterations: 1000,
-        minimizeIterations: 0,
-      },
+    expect(minimized.result.violations).toEqual([]);
+    expect(area(minimized.result.groups.get("docker")!)).toBeLessThan(
+      area(baseline.result.groups.get("docker")!) * 0.7,
     );
+    expect(area(minimized.result.groups.get("cloud")!)).toBeLessThan(
+      area(baseline.result.groups.get("cloud")!),
+    );
+    expect(Math.abs(cache.x - stackTarget.x)).toBeLessThan(1);
+    expect(rect(stackTarget).minY - rect(cache).maxY).toBeCloseTo(100, 1);
+  });
 
-    expect(result.violations).toEqual([]);
+  it("compacts disconnected weather UC1 nodes without enlarging the graph", () => {
+    const scope = parseGraphText(
+      fs.readFileSync(
+        path.join(__dirname, "..", "demo", "scopes", "weather_scope.ggn"),
+        "utf8",
+      ),
+    ).spec;
+    const usecase = parseGraphText(
+      fs.readFileSync(
+        path.join(__dirname, "..", "demo", "usecases", "weather_uc1.ggn"),
+        "utf8",
+      ),
+    ).spec;
+    const solve = (minimizeIterations: number) => {
+      const nodes = scope.nodes.map(bookstoreNode);
+      const indexById = new Map(nodes.map((item, index) => [item.id, index]));
+      const edges = prepareEdges(usecase.edges, "{index}. {label}").map(
+        (edge) => {
+          const lines = edge.label.split("\n");
+          return {
+            source: indexById.get(edge.source) as number,
+            target: indexById.get(edge.target) as number,
+            label: edge.label,
+            labelWidth: Math.max(
+              ...lines.map((line: string) => textWidth(line)),
+            ),
+            labelHeight: lines.length * 16,
+          };
+        },
+      );
+      const result = solveLayout(
+        nodes,
+        scope.boundaries,
+        edges,
+        scope.constraints,
+        {
+          ...options,
+          minGap: 100,
+          nodeGap: 150,
+          boundaryPad: 20,
+          labelBand: 20,
+          nestPad: 36,
+          iterations: 1000,
+          minimizeIterations,
+        },
+      );
+      return { nodes, indexById, result };
+    };
+    const baseline = solve(0);
+    const minimized = solve(100);
+    const nodeById = (solved: ReturnType<typeof solve>, id: string) =>
+      solved.nodes[solved.indexById.get(id)!];
+    const footprintArea = (solved: ReturnType<typeof solve>) => {
+      const bounds = [
+        ...solved.nodes.map((node) => rect(node)),
+        solved.result.groups.get("vpc")!,
+      ].reduce(
+        (result, current) => ({
+          minX: Math.min(result.minX, current.minX),
+          maxX: Math.max(result.maxX, current.maxX),
+          minY: Math.min(result.minY, current.minY),
+          maxY: Math.max(result.maxY, current.maxY),
+        }),
+        { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+      );
+      return (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+    };
+    const baselineProviders = baseline.result.groups.get("providers")!;
+    const minimizedProviders = minimized.result.groups.get("providers")!;
+    const noaa = nodeById(minimized, "noaa");
+    const satellite = nodeById(minimized, "satellite");
+    const client = nodeById(minimized, "client");
+    const attacker = nodeById(minimized, "attacker");
+
+    expect(minimized.result.violations).toEqual([]);
+    expect(footprintArea(minimized)).toBeLessThan(footprintArea(baseline));
+    expect(minimizedProviders.maxX - minimizedProviders.minX).toBeLessThan(
+      baselineProviders.maxX - baselineProviders.minX,
+    );
+    expect(rect(satellite).minY - rect(noaa).maxY).toBeCloseTo(150, 1);
+    expect(rect(attacker).minX - rect(client).maxX).toBeCloseTo(150, 1);
+    expect(rect(satellite).minX).toBeCloseTo(rect(noaa).minX, 1);
   });
 
   it("solves bookstore UC1 with merged multiline edge labels", () => {

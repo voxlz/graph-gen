@@ -1,0 +1,73 @@
+{
+  "name": "element-alignment-boundaries",
+  "nodeGap": 40,
+  "generations": 3,
+  "viewport": { "minX": -500, "minY": -200, "maxX": 500, "maxY": 450 },
+  "nodes": [
+    {
+      "id": "dmz-top",
+      "x": -250,
+      "y": 0,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "dmz"
+    },
+    {
+      "id": "dmz-bottom",
+      "x": -250,
+      "y": 160,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "dmz"
+    },
+    {
+      "id": "lan-node",
+      "x": 250,
+      "y": 260,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "lan"
+    },
+    {
+      "id": "center-blocker",
+      "x": 250,
+      "y": 0,
+      "width": 120,
+      "height": 60,
+      "boundaryParent": "internal"
+    }
+  ],
+  "edges": [],
+  "boundaries": [
+    {
+      "id": "internal",
+      "parent": null,
+      "minX": -390,
+      "minY": -110,
+      "maxX": 390,
+      "maxY": 370,
+      "dynamic": true,
+      "padding": 40
+    },
+    {
+      "id": "dmz",
+      "parent": "internal",
+      "minX": -350,
+      "minY": -70,
+      "maxX": -150,
+      "maxY": 230,
+      "dynamic": true,
+      "padding": 40
+    },
+    {
+      "id": "lan",
+      "parent": "internal",
+      "minX": 150,
+      "minY": 190,
+      "maxX": 350,
+      "maxY": 330,
+      "dynamic": true,
+      "padding": 40
+    }
+  ]
+}
