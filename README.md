@@ -124,6 +124,28 @@ docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style
     graphgen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
 ```
 
+### Watch for changes
+
+For local development, run:
+
+```bash
+npm run watch
+```
+
+This watches the current project and mirrors generated images into `renders/`.
+To watch another path while respecting each graph's `outputPath`, the global
+`style.jsonc` setting, and the built-in default, run the watcher directly:
+
+```bash
+npx tsx src/watch.ts path/to/graphs
+```
+
+You can also provide an output directory explicitly:
+
+```bash
+npx tsx src/watch.ts path/to/graphs path/to/renders
+```
+
 ## Showcase
 
 ### Nodes

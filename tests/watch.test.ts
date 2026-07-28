@@ -26,10 +26,19 @@ describe("watch", () => {
     }
   });
 
-  it("mirrors project-relative graph paths under renders", () => {
-    expect(outputPathFor(path.resolve("demo/showcase/edges.ggn"))).toBe(
-      path.resolve("renders/demo/showcase/edges.png"),
-    );
+  it("uses configured output paths when no override is supplied", () => {
+    expect(
+      outputPathFor(path.resolve("demo/showcase/edges.ggn")),
+    ).toBeUndefined();
+  });
+
+  it("mirrors project-relative graph paths under an output override", () => {
+    expect(
+      outputPathFor(
+        path.resolve("demo/showcase/edges.ggn"),
+        path.resolve("renders"),
+      ),
+    ).toBe(path.resolve("renders/demo/showcase/edges.png"));
   });
 
   it("finds direct and transitive graph importers", () => {

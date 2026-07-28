@@ -1,5 +1,5 @@
 // Watches .ggn files and re-renders them after each save.
-// Usage: tsx src/watch.ts [path]
+// Usage: tsx src/watch.ts [path] [output-directory]
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -7,7 +7,6 @@ import path from "node:path";
 import { parseGraphText } from "./parse";
 
 const rootDir = path.resolve(__dirname, "..");
-const rendersDir = path.join(rootDir, "renders");
 const RED = "\x1b[31m";
 const RESET = "\x1b[0m";
 
@@ -36,13 +35,19 @@ export function findGraphFiles(targetPath: string): string[] {
   return files.sort();
 }
 
-export function outputPathFor(file: string): string {
+export function outputPathFor(
+  file: string,
+  outputDirectory?: string,
+): string | undefined {
+  if (!outputDirectory) return undefined;
+
+  const outputRoot = path.resolve(outputDirectory);
   const relative = path.relative(rootDir, file);
   if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-    return path.join(rendersDir, relative.replace(/\.ggn$/i, ".png"));
+    return path.join(outputRoot, relative.replace(/\.ggn$/i, ".png"));
   }
   return path.join(
-    rendersDir,
+    outputRoot,
     `${path.basename(file, path.extname(file))}.png`,
   );
 }
@@ -83,19 +88,17 @@ function printError(message: string) {
   process.stderr.write(`${RED}${message}${RESET}`);
 }
 
-function renderGraph(file: string): Promise<void> {
-  const output = outputPathFor(file);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
+function renderGraph(file: string, outputDirectory?: string): Promise<void> {
+  const output = outputPathFor(file, outputDirectory);
+  if (output) fs.mkdirSync(path.dirname(output), { recursive: true });
 
   return new Promise((resolve) => {
-    const child = spawn(
-      "tsx",
-      [path.join(__dirname, "index.ts"), file, output],
-      {
-        cwd: rootDir,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const args = [path.join(__dirname, "index.ts"), file];
+    if (output) args.push(output);
+    const child = spawn("tsx", args, {
+      cwd: rootDir,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     child.stdout.on("data", (chunk: Buffer) => process.stdout.write(chunk));
     child.stderr.on("data", (chunk: Buffer) => printError(chunk.toString()));
@@ -110,7 +113,10 @@ function renderGraph(file: string): Promise<void> {
   });
 }
 
-export function startWatch(targetPath = process.cwd()) {
+export function startWatch(
+  targetPath = process.cwd(),
+  outputDirectory?: string,
+) {
   const target = path.resolve(targetPath);
   let targetStat: fs.Stats;
   try {
@@ -141,7 +147,7 @@ export function startWatch(targetPath = process.cwd()) {
 
     rendering = true;
     queued.delete(next);
-    await renderGraph(next);
+    await renderGraph(next, outputDirectory);
     rendering = false;
     void processQueue();
   };
@@ -191,5 +197,5 @@ export function startWatch(targetPath = process.cwd()) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  startWatch(process.argv[2]);
+  startWatch(process.argv[2], process.argv[3]);
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.3
+
+- Watch mode now respects graph-local and global default output paths when no output directory is supplied.
+- `npm run watch` keeps the existing local behavior by explicitly rendering into `renders/`.
+- Removed unused JPEG, GIF, and SVG development libraries from the Docker image while retaining Cairo and Pango support.
+
 ## v3
 
 - Introduced a custom constraint-based layout engine.
