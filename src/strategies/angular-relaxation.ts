@@ -310,6 +310,7 @@ function tryRelaxNeighbor(
       }
       if (obstacleArea(options) > maximumArea + EPSILON) continue;
       const candidateError = totalAngularError(neighborsByHub);
+      if (candidateError >= baselineError - ANGULAR_NUDGE_EPSILON) continue;
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;
       const candidateReadability = readabilityCost(
@@ -318,10 +319,7 @@ function tryRelaxNeighbor(
         options.nodeGap,
         angularWeight,
       );
-      if (
-        candidateError < baselineError - ANGULAR_NUDGE_EPSILON &&
-        candidateReadability < bestReadability - EPSILON
-      ) {
+      if (candidateReadability < bestReadability - EPSILON) {
         bestError = candidateError;
         bestReadability = candidateReadability;
         bestPositions = snapshot(options.nodes);
