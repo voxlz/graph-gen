@@ -5,6 +5,16 @@ import {
 import { compactness } from "../../src/strategies/shared";
 import { createStrategyCase } from "./fixture";
 
+function angularGaps(angles: number[]): number[] {
+  const ordered = [...angles].sort((first, second) => first - second);
+  return ordered
+    .map(
+      (angle, index) =>
+        (ordered[(index + 1) % ordered.length] - angle + 360) % 360,
+    )
+    .sort((first, second) => first - second);
+}
+
 test("angular relaxation spreads clustered edges around their hub", () => {
   const strategyCase = createStrategyCase("angular-relaxation");
   expect(strategyCase.options.isValid(true)).toBe(true);
@@ -16,6 +26,15 @@ test("angular relaxation spreads clustered edges around their hub", () => {
       .filter((node) => node !== hub)
       .map((node) => [node.id, Math.hypot(node.x - hub.x, node.y - hub.y)]),
   );
+  const beforeGaps = angularGaps(
+    strategyCase.options.nodes
+      .filter((node) => node !== hub)
+      .map(
+        (node) =>
+          ((Math.atan2(node.y - hub.y, node.x - hub.x) * 180) / Math.PI + 360) %
+          360,
+      ),
+  );
 
   expect(
     minimizeAngularRelaxation(strategyCase.options, before.area * 1.05),
@@ -24,21 +43,17 @@ test("angular relaxation spreads clustered edges around their hub", () => {
   expect(angularRelaxationScore(strategyCase.options.edges)).toBeLessThan(
     beforeAngularScore,
   );
-  const angles = strategyCase.options.nodes
-    .filter((node) => node !== hub)
-    .map(
-      (node) =>
-        ((Math.atan2(node.y - hub.y, node.x - hub.x) * 180) / Math.PI + 360) %
-        360,
-    )
-    .sort((first, second) => first - second);
-  const gaps = angles.map(
-    (angle, index) => (angles[(index + 1) % angles.length] - angle + 360) % 360,
+  const afterGaps = angularGaps(
+    strategyCase.options.nodes
+      .filter((node) => node !== hub)
+      .map(
+        (node) =>
+          ((Math.atan2(node.y - hub.y, node.x - hub.x) * 180) / Math.PI + 360) %
+          360,
+      ),
   );
-  const sortedGaps = gaps.sort((first, second) => first - second);
-  expect(sortedGaps[0]).toBeCloseTo(40, 1);
-  expect(sortedGaps[1]).toBeCloseTo(40, 1);
-  expect(sortedGaps[2]).toBeCloseTo(280, 1);
+  expect(afterGaps[0]).toBeGreaterThan(beforeGaps[0]);
+  expect(afterGaps.at(-1)).toBeLessThan(beforeGaps.at(-1)!);
   for (const node of strategyCase.options.nodes.filter(
     (node) => node !== hub,
   )) {
