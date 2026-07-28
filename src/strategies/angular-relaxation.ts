@@ -3,7 +3,10 @@ import {
   compactness,
   emitIteration,
   EPSILON,
+  expandRect,
   measureBounds,
+  nodeRect,
+  rectanglesOverlap,
   restore,
   setNodeAxis,
   snapshot,
@@ -24,6 +27,19 @@ const NUDGE_FRACTIONS = [
 ] as const;
 
 type NeighborMap = Map<LayoutNode, LayoutNode[]>;
+
+function hasNodeClearanceViolation(options: MinimizeOptions): boolean {
+  const padding = options.nodeGap / 2;
+  const rects = options.nodes.map((node) =>
+    expandRect(nodeRect(node), padding),
+  );
+  for (let first = 0; first < rects.length; first++) {
+    for (let second = first + 1; second < rects.length; second++) {
+      if (rectanglesOverlap(rects[first], rects[second])) return true;
+    }
+  }
+  return false;
+}
 
 function normalizedAngle(angle: number): number {
   return ((angle % FULL_TURN) + FULL_TURN) % FULL_TURN;
@@ -289,7 +305,9 @@ function tryRelaxNeighbor(
       ) {
         continue;
       }
-      if (!options.isValid(false)) continue;
+      if (hasNodeClearanceViolation(options) || !options.isValid(false)) {
+        continue;
+      }
       if (obstacleArea(options) > maximumArea + EPSILON) continue;
       const candidateError = totalAngularError(neighborsByHub);
       const candidateMeasure = options.measure();
