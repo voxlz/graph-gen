@@ -4,8 +4,10 @@ import {
   compareByKeys,
   emitIteration,
   EPSILON,
+  expandRect,
   measureBounds,
   nodeRect,
+  rectanglesOverlap,
   restore,
   setNodeAxis,
   snapshot,
@@ -20,6 +22,19 @@ function layoutCenter(nodes: LayoutNode[]): { x: number; y: number } {
         y: (bounds.minY + bounds.maxY) / 2,
       }
     : { x: 0, y: 0 };
+}
+
+function hasNodeClearanceViolation(options: MinimizeOptions): boolean {
+  const padding = options.nodeGap / 2;
+  const rects = options.nodes.map((node) =>
+    expandRect(nodeRect(node), padding),
+  );
+  for (let first = 0; first < rects.length; first++) {
+    for (let second = first + 1; second < rects.length; second++) {
+      if (rectanglesOverlap(rects[first], rects[second])) return true;
+    }
+  }
+  return false;
 }
 
 function tryMinimizeAxis(
@@ -38,7 +53,9 @@ function tryMinimizeAxis(
   ]) {
     restore(options.nodes, originalPositions);
     setNodeAxis(options, node, axis, original + delta * fraction);
-    if (options.isValid(true)) return true;
+    if (!hasNodeClearanceViolation(options) && options.isValid(true)) {
+      return true;
+    }
   }
   restore(options.nodes, originalPositions);
   return false;
