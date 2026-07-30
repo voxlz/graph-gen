@@ -13,13 +13,13 @@ export interface ForceLayoutOptions {
   linkLength: number;
   nodeRepulsion: number;
   boundaryRepulsion: number;
+  foreignBoundaryRepulsion: number;
   edgeAttraction: number;
+  parentAttraction: number;
   siblingAttraction: number;
   crossingRepulsion: number;
   angularSeparation: number;
   edgePressure: number;
-  step: number;
-  minimumStep: number;
   damping: number;
   convergenceThreshold: number;
   stableIterations: number;
@@ -33,13 +33,13 @@ export const DEFAULT_FORCE_LAYOUT: Omit<
 > = {
   nodeRepulsion: 1.4,
   boundaryRepulsion: 0.7,
-  edgeAttraction: 0.08,
+  foreignBoundaryRepulsion: 10,
+  edgeAttraction: 1.5,
+  parentAttraction: 0.006,
   siblingAttraction: 0.018,
   crossingRepulsion: 0.45,
   angularSeparation: 0.7,
   edgePressure: 0,
-  step: 18,
-  minimumStep: 0.01,
   damping: 0.7,
   convergenceThreshold: 0.01,
   stableIterations: 5,
@@ -109,6 +109,21 @@ function membersOf(
     }
     return false;
   });
+}
+
+function isBoundaryAncestor(
+  ancestorId: string,
+  descendantId: string,
+  boundaryById: Map<string, LayoutBoundary>,
+): boolean {
+  let parent = boundaryById.get(descendantId)?.parent ?? null;
+  const seen = new Set<string>();
+  while (parent && !seen.has(parent)) {
+    if (parent === ancestorId) return true;
+    seen.add(parent);
+    parent = boundaryById.get(parent)?.parent ?? null;
+  }
+  return false;
 }
 
 function seedGrid(nodes: LayoutNode[], gap: number): void {
@@ -263,15 +278,89 @@ export function applyForceLayout(
       applyOutlierPressure("y", -1);
     }
 
+    for (const [parent, children] of entitiesByParent) {
+      if (children.length < 2) continue;
+      const parentCenter = center(
+        rectFor(children.flatMap((child) => child.nodes)),
+      );
+      for (const child of children) {
+        const childCenter = center(child.rect);
+        addForce(
+          child.nodes,
+          (parentCenter.x - childCenter.x) * options.parentAttraction,
+          (parentCenter.y - childCenter.y) * options.parentAttraction,
+        );
+      }
+    }
+
+    const boundaryEntities = entities.filter((entity) =>
+      boundaryById.has(entity.id),
+    );
+    for (let first = 0; first < boundaryEntities.length; first++) {
+      for (let second = first + 1; second < boundaryEntities.length; second++) {
+        const a = boundaryEntities[first];
+        const b = boundaryEntities[second];
+        if (
+          isBoundaryAncestor(a.id, b.id, boundaryById) ||
+          isBoundaryAncestor(b.id, a.id, boundaryById)
+        )
+          continue;
+        const aContainsB =
+          a.rect.minX <= b.rect.minX &&
+          a.rect.maxX >= b.rect.maxX &&
+          a.rect.minY <= b.rect.minY &&
+          a.rect.maxY >= b.rect.maxY;
+        const bContainsA =
+          b.rect.minX <= a.rect.minX &&
+          b.rect.maxX >= a.rect.maxX &&
+          b.rect.minY <= a.rect.minY &&
+          b.rect.maxY >= a.rect.maxY;
+        if (!aContainsB && !bContainsA) continue;
+        const container = aContainsB ? a : b;
+        const escaping = aContainsB ? b : a;
+        const exits = [
+          {
+            x: container.rect.minX - escaping.rect.maxX - options.nodeGap,
+            y: 0,
+          },
+          {
+            x: container.rect.maxX - escaping.rect.minX + options.nodeGap,
+            y: 0,
+          },
+          {
+            x: 0,
+            y: container.rect.minY - escaping.rect.maxY - options.nodeGap,
+          },
+          {
+            x: 0,
+            y: container.rect.maxY - escaping.rect.minY + options.nodeGap,
+          },
+        ];
+        const exit = exits.reduce((best, candidate) =>
+          Math.abs(candidate.x || candidate.y) < Math.abs(best.x || best.y)
+            ? candidate
+            : best,
+        );
+        const exitDistance = Math.hypot(exit.x, exit.y);
+        const normalizedDepth = exitDistance / Math.max(1, options.nodeGap);
+        const scale =
+          (options.foreignBoundaryRepulsion * (1 + normalizedDepth) ** 2) /
+          Math.max(1, options.nodeGap);
+        addForce(escaping.nodes, exit.x * scale, exit.y * scale);
+      }
+    }
+
     for (const edge of edges) {
       const source = endpoint(edge, "source");
       const target = endpoint(edge, "target");
       const dx = target.x - source.x;
       const dy = target.y - source.y;
       const distance = Math.hypot(dx, dy) || 1;
+      const stretch = distance / options.linkLength - 1;
       const scale =
-        (options.edgeAttraction * (distance - options.linkLength)) /
-        options.linkLength;
+        options.edgeAttraction *
+        stretch *
+        Math.max(1, distance / options.linkLength);
       addForce([source], (dx / distance) * scale, (dy / distance) * scale);
       addForce([target], (-dx / distance) * scale, (-dy / distance) * scale);
     }
@@ -422,8 +511,6 @@ export function applyForceLayout(
       }
     }
 
-    const cooling = 1 - iteration / Math.max(1, options.iterations - 1);
-    const maximumStep = Math.max(options.minimumStep, options.step * cooling);
     let maximumForce = 0;
     let maximumDisplacement = 0;
     for (const node of nodes) {
@@ -432,12 +519,6 @@ export function applyForceLayout(
       const velocity = velocities.get(node)!;
       velocity.x = velocity.x * options.damping + force.x;
       velocity.y = velocity.y * options.damping + force.y;
-      const velocityMagnitude = Math.hypot(velocity.x, velocity.y);
-      if (velocityMagnitude > maximumStep) {
-        const scale = maximumStep / velocityMagnitude;
-        velocity.x *= scale;
-        velocity.y *= scale;
-      }
       maximumDisplacement = Math.max(
         maximumDisplacement,
         Math.hypot(velocity.x, velocity.y),

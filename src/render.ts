@@ -352,6 +352,14 @@ export async function renderGraph(
         globalStyle.graph?.debugFrameEvery ??
         0,
     ),
+    forceNodeGapMultiplier: Math.max(
+      1,
+      Number(
+        spec.graph?.forceNodeGapMultiplier ??
+          globalStyle.graph?.forceNodeGapMultiplier ??
+          1.5,
+      ),
+    ),
     minimize: Number(
       process.env.GRAPHGEN_MINIMIZE ??
         spec.graph?.minimize ??
@@ -369,10 +377,20 @@ export async function renderGraph(
           globalStyle.graph?.forceBoundaryRepulsion ??
           DEFAULT_FORCE_LAYOUT.boundaryRepulsion,
       ),
+      foreignBoundaryRepulsion: Number(
+        spec.graph?.forceForeignBoundaryRepulsion ??
+          globalStyle.graph?.forceForeignBoundaryRepulsion ??
+          DEFAULT_FORCE_LAYOUT.foreignBoundaryRepulsion,
+      ),
       edgeAttraction: Number(
         spec.graph?.forceEdgeAttraction ??
           globalStyle.graph?.forceEdgeAttraction ??
           DEFAULT_FORCE_LAYOUT.edgeAttraction,
+      ),
+      parentAttraction: Number(
+        spec.graph?.forceParentAttraction ??
+          globalStyle.graph?.forceParentAttraction ??
+          DEFAULT_FORCE_LAYOUT.parentAttraction,
       ),
       siblingAttraction: Number(
         spec.graph?.forceSiblingAttraction ??
@@ -393,16 +411,6 @@ export async function renderGraph(
         spec.graph?.forceEdgePressure ??
           globalStyle.graph?.forceEdgePressure ??
           DEFAULT_FORCE_LAYOUT.edgePressure,
-      ),
-      step: Number(
-        spec.graph?.forceStep ??
-          globalStyle.graph?.forceStep ??
-          DEFAULT_FORCE_LAYOUT.step,
-      ),
-      minimumStep: Number(
-        spec.graph?.forceMinimumStep ??
-          globalStyle.graph?.forceMinimumStep ??
-          DEFAULT_FORCE_LAYOUT.minimumStep,
       ),
       damping: Number(
         spec.graph?.forceDamping ??
@@ -736,7 +744,7 @@ export async function renderGraph(
         iterations: Number.isFinite(graphMeta.layoutIterations)
           ? Math.max(1, Math.floor(graphMeta.layoutIterations))
           : 1000,
-        nodeGap: graphMeta.nodeGap,
+        nodeGap: graphMeta.nodeGap * graphMeta.forceNodeGapMultiplier,
         linkLength: graphMeta.linkLength,
         debugFrameEvery: Number.isFinite(graphMeta.forceDebugFrameEvery)
           ? Math.max(0, Math.floor(graphMeta.forceDebugFrameEvery))

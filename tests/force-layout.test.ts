@@ -36,13 +36,13 @@ test("force layout separates crowded incident edge angles", () => {
       linkLength: 100,
       nodeRepulsion: 0,
       boundaryRepulsion: 0,
+      foreignBoundaryRepulsion: 0,
       edgeAttraction: 0,
+      parentAttraction: 0,
       siblingAttraction: 0,
       crossingRepulsion: 0,
       angularSeparation: 1,
       edgePressure: 0,
-      step: 1,
-      minimumStep: 0,
       damping: 0,
       convergenceThreshold: 0,
       stableIterations: 1,
@@ -77,13 +77,13 @@ test("force layout permits early overlap while connected nodes exchange sides", 
     linkLength: 1,
     nodeRepulsion: 1.4,
     boundaryRepulsion: 0,
-    edgeAttraction: 0.08,
+    foreignBoundaryRepulsion: 0,
+    edgeAttraction: 0.001,
+    parentAttraction: 0,
     siblingAttraction: 0,
     crossingRepulsion: 0,
     angularSeparation: 0,
     edgePressure: 0,
-    step: 10,
-    minimumStep: 0,
     damping: 0,
     convergenceThreshold: 0,
     stableIterations: 1,
@@ -91,6 +91,140 @@ test("force layout permits early overlap while connected nodes exchange sides", 
   });
 
   expect(Math.abs(catalog.x - cache.x)).toBeLessThan(initialDistance);
+});
+
+test("overstretched edges pull more strongly than a linear spring", () => {
+  const nodes: LayoutNode[] = ["a", "b"].map((id) => ({
+    id,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    boundaryParent: null,
+  }));
+  const [a, b] = nodes;
+
+  applyForceLayout(nodes, [], [{ source: a, target: b }], {
+    iterations: 1,
+    nodeGap: 20,
+    linkLength: 10,
+    nodeRepulsion: 0,
+    boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
+    edgeAttraction: 1,
+    parentAttraction: 0,
+    siblingAttraction: 0,
+    crossingRepulsion: 0,
+    angularSeparation: 0,
+    edgePressure: 0,
+    damping: 0,
+    convergenceThreshold: 0,
+    stableIterations: 1,
+    collisionRampIterations: 1,
+  });
+
+  expect(Math.abs(b.x - a.x)).toBe(18);
+});
+
+test("unrelated contained boundaries are pushed apart", () => {
+  const nodes: LayoutNode[] = ["a", "b", "c", "d"].map((id) => ({
+    id,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    boundaryParent: id === "d" ? "inner" : "outer",
+  }));
+  const contained = nodes.find((node) => node.id === "d")!;
+
+  applyForceLayout(nodes, [{ id: "outer" }, { id: "inner" }], [], {
+    iterations: 1,
+    nodeGap: 0,
+    linkLength: 100,
+    nodeRepulsion: 0,
+    boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 1,
+    edgeAttraction: 0,
+    parentAttraction: 0,
+    siblingAttraction: 0,
+    crossingRepulsion: 0,
+    angularSeparation: 0,
+    edgePressure: 0,
+    damping: 0,
+    convergenceThreshold: 0,
+    stableIterations: 1,
+    collisionRampIterations: 1,
+  });
+
+  expect(contained.x).toBeGreaterThan(10);
+});
+
+test("parent attraction pulls direct boundary children toward its center", () => {
+  const nodes: LayoutNode[] = ["a", "b"].map((id) => ({
+    id,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    boundaryParent: "group",
+  }));
+  const [a, b] = nodes;
+
+  applyForceLayout(nodes, [{ id: "group" }], [], {
+    iterations: 1,
+    nodeGap: 10,
+    linkLength: 100,
+    nodeRepulsion: 0,
+    boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
+    edgeAttraction: 0,
+    parentAttraction: 0.01,
+    siblingAttraction: 0,
+    crossingRepulsion: 0,
+    angularSeparation: 0,
+    edgePressure: 0,
+    damping: 0,
+    convergenceThreshold: 0,
+    stableIterations: 1,
+    collisionRampIterations: 1,
+  });
+
+  expect(a.x).toBeGreaterThan(0);
+  expect(b.x).toBeLessThan(20);
+});
+
+test("parent attraction treats the graph as the root entities' parent", () => {
+  const nodes: LayoutNode[] = ["a", "b"].map((id) => ({
+    id,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    boundaryParent: null,
+  }));
+  const [a, b] = nodes;
+
+  applyForceLayout(nodes, [], [], {
+    iterations: 1,
+    nodeGap: 10,
+    linkLength: 100,
+    nodeRepulsion: 0,
+    boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
+    edgeAttraction: 0,
+    parentAttraction: 0.01,
+    siblingAttraction: 0,
+    crossingRepulsion: 0,
+    angularSeparation: 0,
+    edgePressure: 0,
+    damping: 0,
+    convergenceThreshold: 0,
+    stableIterations: 1,
+    collisionRampIterations: 1,
+  });
+
+  expect(a.x).toBeGreaterThan(0);
+  expect(b.x).toBeLessThan(20);
 });
 
 test("edge pressure does not move connected edge siblings", () => {
@@ -110,13 +244,13 @@ test("edge pressure does not move connected edge siblings", () => {
     linkLength: 100,
     nodeRepulsion: 0,
     boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
     edgeAttraction: 0,
+    parentAttraction: 0,
     siblingAttraction: 0,
     crossingRepulsion: 0,
     angularSeparation: 0,
     edgePressure: 3.5,
-    step: 10,
-    minimumStep: 0,
     damping: 0,
     convergenceThreshold: 0,
     stableIterations: 1,
@@ -140,13 +274,13 @@ test("edge pressure always pulls a loose node away from its boundary edge", () =
     linkLength: 100,
     nodeRepulsion: 0,
     boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
     edgeAttraction: 0,
+    parentAttraction: 0,
     siblingAttraction: 0,
     crossingRepulsion: 0,
     angularSeparation: 0,
     edgePressure: 3.5,
-    step: 10,
-    minimumStep: 0,
     damping: 0,
     convergenceThreshold: 0,
     stableIterations: 1,
@@ -173,13 +307,13 @@ test("sibling attraction stops at collision clearance", () => {
     linkLength: 100,
     nodeRepulsion: 1.4,
     boundaryRepulsion: 0,
+    foreignBoundaryRepulsion: 0,
     edgeAttraction: 0,
+    parentAttraction: 0,
     siblingAttraction: 1,
     crossingRepulsion: 0,
     angularSeparation: 0,
     edgePressure: 0,
-    step: 2,
-    minimumStep: 0.01,
     damping: 0.2,
     convergenceThreshold: 0,
     stableIterations: 1,
