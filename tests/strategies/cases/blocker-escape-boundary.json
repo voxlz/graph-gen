@@ -1,0 +1,54 @@
+{
+  "name": "blocker-escape-boundary",
+  "nodeGap": 20,
+  "generations": 3,
+  "viewport": { "minX": 20, "minY": -170, "maxX": 300, "maxY": 170 },
+  "nodes": [
+    {
+      "id": "matomo",
+      "x": 130,
+      "y": 0,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "axisNetwork"
+    },
+    {
+      "id": "nginx",
+      "x": 200,
+      "y": -30,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "vm"
+    },
+    {
+      "id": "app",
+      "x": 200,
+      "y": 30,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "vm"
+    },
+    {
+      "id": "anchor",
+      "x": 130,
+      "y": 180,
+      "width": 40,
+      "height": 40,
+      "boundaryParent": "axisNetwork"
+    }
+  ],
+  "edges": [],
+  "boundaries": [
+    {
+      "id": "axisNetwork",
+      "dynamic": true,
+      "padding": 20
+    },
+    {
+      "id": "vm",
+      "parent": "axisNetwork",
+      "dynamic": true,
+      "padding": 20
+    }
+  ]
+}

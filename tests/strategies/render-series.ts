@@ -34,6 +34,7 @@ const STRATEGIES = [
   "center",
   "edge-shortening",
   "blocker-escape",
+  "blocker-escape-boundary",
   "angular-relaxation",
   "shared-hub-compaction",
   "node-swap",
@@ -233,7 +234,7 @@ function runStrategy(name: (typeof STRATEGIES)[number]): void {
     minimizeTowardCenter(strategyCase.options);
   } else if (name === "edge-shortening") {
     minimizeEdgeLengths(strategyCase.options, baseline.area * 1.05);
-  } else if (name === "blocker-escape") {
+  } else if (name === "blocker-escape" || name === "blocker-escape-boundary") {
     minimizeBlockerEscapes(strategyCase.options, baseline.area * 1.05);
   } else if (name === "angular-relaxation") {
     minimizeAngularRelaxation(strategyCase.options, baseline.area * 1.05);
