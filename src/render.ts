@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as cola from "webcola";
+import { applyForceLayout, DEFAULT_FORCE_LAYOUT } from "./force-layout";
 import { createCanvas } from "canvas";
 import { stripComments, type GraphSpec } from "./parse";
 import { solveLayout, type LayoutSnapshot } from "./layout";
@@ -91,11 +92,11 @@ async function writeDebugFrames(
 ): Promise<void> {
   if (snapshots.length === 0) return;
   const margin = 50;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const snapshot of snapshots) {
+  const boundsFor = (snapshot: LayoutSnapshot) => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     for (const node of snapshot.nodes) {
       minX = Math.min(minX, node.x - node.width / 2);
       maxX = Math.max(maxX, node.x + node.width / 2);
@@ -115,16 +116,18 @@ async function writeDebugFrames(
       minY = Math.min(minY, label.y - label.height / 2 - 2);
       maxY = Math.max(maxY, label.y + label.height / 2 + 2);
     }
-  }
-  if (!Number.isFinite(minX)) return;
-  const width = Math.max(160, Math.ceil(maxX - minX + margin * 2));
-  const height = Math.max(120, Math.ceil(maxY - minY + margin * 2));
+    return { minX, minY, maxX, maxY };
+  };
   const frameDirectory = path.join(
     path.dirname(outputPath),
     `${path.basename(outputPath, path.extname(outputPath))}.frames`,
   );
   fs.mkdirSync(frameDirectory, { recursive: true });
   for (const snapshot of snapshots) {
+    const { minX, minY, maxX, maxY } = boundsFor(snapshot);
+    if (!Number.isFinite(minX)) continue;
+    const width = Math.max(160, Math.ceil(maxX - minX + margin * 2));
+    const height = Math.max(120, Math.ceil(maxY - minY + margin * 2));
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext("2d");
     const tx = (x: number) => x - minX + margin;
@@ -136,7 +139,7 @@ async function writeDebugFrames(
     ctx.textBaseline = "top";
     ctx.fillStyle = snapshot.violations === 0 ? "#157347" : "#b42318";
     ctx.fillText(
-      `iteration ${snapshot.iteration} | violations ${snapshot.violations}`,
+      `${snapshot.phase === "force" ? `force iteration ${snapshot.iteration}` : snapshot.phase === "final" ? "final after minimize" : snapshot.phase === "labels" ? "labels before minimize" : `repair iteration ${snapshot.iteration}`} | violations ${snapshot.violations}`,
       10,
       10,
     );
@@ -204,7 +207,13 @@ async function writeDebugFrames(
       canvas,
       path.join(
         frameDirectory,
-        `iteration-${String(snapshot.iteration).padStart(4, "0")}.png`,
+        snapshot.phase === "final"
+          ? "final.png"
+          : snapshot.phase === "labels"
+            ? "labels.png"
+            : snapshot.phase === "force"
+              ? `force-${String(snapshot.iteration).padStart(4, "0")}.png`
+              : `iteration-${String(snapshot.iteration).padStart(4, "0")}.png`,
       ),
     );
   }
@@ -334,12 +343,88 @@ export async function renderGraph(
         globalStyle.graph?.debugFrameEvery ??
         0,
     ),
+    forceDebugFrameEvery: Number(
+      process.env.GRAPHGEN_FORCE_DEBUG_FRAMES ??
+        spec.graph?.forceDebugFrameEvery ??
+        globalStyle.graph?.forceDebugFrameEvery ??
+        process.env.GRAPHGEN_DEBUG_FRAMES ??
+        spec.graph?.debugFrameEvery ??
+        globalStyle.graph?.debugFrameEvery ??
+        0,
+    ),
     minimize: Number(
       process.env.GRAPHGEN_MINIMIZE ??
         spec.graph?.minimize ??
         globalStyle.graph?.minimize ??
         100,
     ),
+    force: {
+      nodeRepulsion: Number(
+        spec.graph?.forceNodeRepulsion ??
+          globalStyle.graph?.forceNodeRepulsion ??
+          DEFAULT_FORCE_LAYOUT.nodeRepulsion,
+      ),
+      boundaryRepulsion: Number(
+        spec.graph?.forceBoundaryRepulsion ??
+          globalStyle.graph?.forceBoundaryRepulsion ??
+          DEFAULT_FORCE_LAYOUT.boundaryRepulsion,
+      ),
+      edgeAttraction: Number(
+        spec.graph?.forceEdgeAttraction ??
+          globalStyle.graph?.forceEdgeAttraction ??
+          DEFAULT_FORCE_LAYOUT.edgeAttraction,
+      ),
+      siblingAttraction: Number(
+        spec.graph?.forceSiblingAttraction ??
+          globalStyle.graph?.forceSiblingAttraction ??
+          DEFAULT_FORCE_LAYOUT.siblingAttraction,
+      ),
+      crossingRepulsion: Number(
+        spec.graph?.forceCrossingRepulsion ??
+          globalStyle.graph?.forceCrossingRepulsion ??
+          DEFAULT_FORCE_LAYOUT.crossingRepulsion,
+      ),
+      angularSeparation: Number(
+        spec.graph?.forceAngularSeparation ??
+          globalStyle.graph?.forceAngularSeparation ??
+          DEFAULT_FORCE_LAYOUT.angularSeparation,
+      ),
+      edgePressure: Number(
+        spec.graph?.forceEdgePressure ??
+          globalStyle.graph?.forceEdgePressure ??
+          DEFAULT_FORCE_LAYOUT.edgePressure,
+      ),
+      step: Number(
+        spec.graph?.forceStep ??
+          globalStyle.graph?.forceStep ??
+          DEFAULT_FORCE_LAYOUT.step,
+      ),
+      minimumStep: Number(
+        spec.graph?.forceMinimumStep ??
+          globalStyle.graph?.forceMinimumStep ??
+          DEFAULT_FORCE_LAYOUT.minimumStep,
+      ),
+      damping: Number(
+        spec.graph?.forceDamping ??
+          globalStyle.graph?.forceDamping ??
+          DEFAULT_FORCE_LAYOUT.damping,
+      ),
+      convergenceThreshold: Number(
+        spec.graph?.forceConvergenceThreshold ??
+          globalStyle.graph?.forceConvergenceThreshold ??
+          DEFAULT_FORCE_LAYOUT.convergenceThreshold,
+      ),
+      stableIterations: Number(
+        spec.graph?.forceStableIterations ??
+          globalStyle.graph?.forceStableIterations ??
+          DEFAULT_FORCE_LAYOUT.stableIterations,
+      ),
+      collisionRampIterations: Number(
+        spec.graph?.forceCollisionRampIterations ??
+          globalStyle.graph?.forceCollisionRampIterations ??
+          DEFAULT_FORCE_LAYOUT.collisionRampIterations,
+      ),
+    },
   };
 
   // --- text measuring (for sizing nodes to their labels) ----------------------
@@ -644,13 +729,43 @@ export async function renderGraph(
   // touch (zero gap). To enforce a minimum clearance we inflate every node by
   // nodeGap for the duration of the solve, then restore the true render size.
   let constraintGroupRects: Map<string, any> | null = null;
-  if (graphMeta.layout === "constraint") {
-    const result = solveLayout(
-      nodes,
-      boundaries,
-      links,
-      spec.constraints || [],
-      {
+  if (graphMeta.layout === "constraint" || graphMeta.layout === "force") {
+    let forceSnapshots: LayoutSnapshot[] = [];
+    if (graphMeta.layout === "force") {
+      forceSnapshots = applyForceLayout(nodes, boundaries, links, {
+        iterations: Number.isFinite(graphMeta.layoutIterations)
+          ? Math.max(1, Math.floor(graphMeta.layoutIterations))
+          : 1000,
+        nodeGap: graphMeta.nodeGap,
+        linkLength: graphMeta.linkLength,
+        debugFrameEvery: Number.isFinite(graphMeta.forceDebugFrameEvery)
+          ? Math.max(0, Math.floor(graphMeta.forceDebugFrameEvery))
+          : 0,
+        ...graphMeta.force,
+      });
+    }
+    let result = solveLayout(nodes, boundaries, links, spec.constraints || [], {
+      minGap: graphMeta.minGap,
+      nodeGap: graphMeta.nodeGap,
+      boundaryPad: graphMeta.boundaryPad,
+      labelBand: graphMeta.labelBand,
+      nestPad: graphMeta.nestPad,
+      iterations: Number.isFinite(graphMeta.layoutIterations)
+        ? Math.max(1, Math.floor(graphMeta.layoutIterations))
+        : 1000,
+      debugFrameEvery: Number.isFinite(graphMeta.debugFrameEvery)
+        ? Math.max(0, Math.floor(graphMeta.debugFrameEvery))
+        : 0,
+      minimizeIterations: Number.isFinite(graphMeta.minimize)
+        ? Math.max(0, Math.floor(graphMeta.minimize))
+        : 100,
+      preserveInitialPositions: graphMeta.layout === "force",
+    });
+    if (graphMeta.layout === "force" && !result.valid) {
+      console.warn(
+        `[force] repair did not converge; falling back to the constraint grid seed: ${result.violations.slice(0, 3).join("; ")}`,
+      );
+      result = solveLayout(nodes, boundaries, links, spec.constraints || [], {
         minGap: graphMeta.minGap,
         nodeGap: graphMeta.nodeGap,
         boundaryPad: graphMeta.boundaryPad,
@@ -659,16 +774,18 @@ export async function renderGraph(
         iterations: Number.isFinite(graphMeta.layoutIterations)
           ? Math.max(1, Math.floor(graphMeta.layoutIterations))
           : 1000,
-        debugFrameEvery: Number.isFinite(graphMeta.debugFrameEvery)
-          ? Math.max(0, Math.floor(graphMeta.debugFrameEvery))
-          : 0,
+        debugFrameEvery: 0,
         minimizeIterations: Number.isFinite(graphMeta.minimize)
           ? Math.max(0, Math.floor(graphMeta.minimize))
           : 100,
-      },
-    );
+      });
+    }
     constraintGroupRects = result.groups;
-    await writeDebugFrames(result.snapshots, outputPath, links);
+    await writeDebugFrames(
+      [...forceSnapshots, ...result.snapshots],
+      outputPath,
+      links,
+    );
     if (!result.valid) {
       const details = result.violations.slice(0, 8).join("; ");
       throw new Error(
@@ -699,7 +816,7 @@ export async function renderGraph(
     }
   } else {
     throw new Error(
-      `unknown graph.layout ${JSON.stringify(graphMeta.layout)}; expected "constraint" or "cola"`,
+      `unknown graph.layout ${JSON.stringify(graphMeta.layout)}; expected "constraint", "force", or "cola"`,
     );
   }
 

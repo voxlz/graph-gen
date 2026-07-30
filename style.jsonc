@@ -9,10 +9,16 @@
     "labelBand": 20, // extra top room inside a boundary for its label
     "nestPad": 36, // extra padding per nesting level (parent label clears nested border)
     "iterations": [0, 100, 1000], // WebCola solver passes [unconstrained, userConstraint, allConstraint]
-    "layout": "constraint", // "constraint" (default) or legacy "cola"
+    "layout": "constraint", // "constraint" (default), "force", or legacy "cola"
     "layoutIterations": 1000, // hard limit for the constraint solver
     "minimize": 100, // post-layout generations that compact valid layouts toward the center
     "debugFrameEvery": 0, // set to 5 to write a PNG every five solver iterations
+    "forceDebugFrameEvery": 0, // defaults to debugFrameEvery; samples force iterations separately
+    "forceEdgePressure": 3.5, // always pulls unconnected boundary-edge nodes inward; collisions reposition other nodes
+    "forceDamping": 0.7, // retains a fraction of each node's previous force-layout velocity
+    "forceConvergenceThreshold": 0.01, // maximum force and movement for force-layout convergence
+    "forceStableIterations": 5, // consecutive converged force-layout iterations required to stop early
+    "forceCollisionRampIterations": 250, // early iterations allow temporary node overlap to escape ordering traps
     "lines": "direct", // "direct" or "curved" or "angled". lets only support direct for now.
   },
   "shapes": {

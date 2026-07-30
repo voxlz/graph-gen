@@ -27,6 +27,30 @@ describe("renderGraph", () => {
     }
   });
 
+  it("renders a graph with the force layout strategy", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graphgen-render-force-"),
+    );
+    const output = path.join(directory, "graph.png");
+    const spec = emptyGraphSpec();
+    spec.graph.layout = "force";
+    spec.nodes = [
+      { id: "source", label: "Source", shape: "box", parent: null },
+      { id: "target", label: "Target", shape: "box", parent: null },
+      { id: "blocker", label: "Blocker", shape: "box", parent: null },
+    ];
+    spec.edges = [{ source: "source", target: "target" }];
+
+    try {
+      const result = await renderGraph(spec, output);
+
+      expect(result.width).toBeGreaterThan(0);
+      expect(fs.statSync(output).size).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("formats graph edge labels with their index and parsed edge data", () => {
     const edge = {
       source: "customer",
