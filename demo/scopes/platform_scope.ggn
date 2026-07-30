@@ -1,0 +1,45 @@
+title "Platform - Scope"
+
+graph {
+    nodeGap 80
+}
+
+nodes {
+    box client: "Client"
+    boundary axisNetwork: "Axis network" {
+        actor attacker: "Network Attacker"
+        box idp: "Curity (auth.axis.com)"
+        circle ldap: "Axis LDAP"
+        box sentry: "Sentry"
+        box matomo: "Matomo"
+        boundary vm: "Virtual machine" {
+            box nginx: "nginx"
+            box oauth2: "oauth2-proxy"
+            box app: "App"
+        }
+    }
+}
+
+edges {
+    client --- nginx
+    nginx --- app
+    nginx --- oauth2
+    oauth2 --- idp
+    app --- ldap
+    client --- idp
+    app --- sentry
+    client --- sentry
+    client --- matomo
+}
+
+constraints {
+    app right nginx
+    oauth2 top nginx
+    idp top oauth2
+    ldap bottom app
+
+    // client is external — to the left of the whole Axis network
+    client left axisNetwork
+    ldap right app
+    attacker right vm
+}
