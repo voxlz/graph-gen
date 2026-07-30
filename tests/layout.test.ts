@@ -445,12 +445,26 @@ constraints {
     expect(
       nodes.every((current) => !rectanglesOverlap(labelRect, rect(current))),
     ).toBe(true);
-    expect(result.snapshots[0].iteration).toBe(0);
+    const repairSnapshots = result.snapshots.filter(
+      (snapshot) => snapshot.phase === "repair",
+    );
+    expect(repairSnapshots[0].iteration).toBe(0);
     expect(result.snapshots.at(-1)?.iteration).toBe(result.iterations);
+    expect(result.snapshots.at(-1)?.phase).toBe("final");
     expect(
-      result.snapshots
-        .slice(1, -1)
-        .every((snapshot) => snapshot.iteration % 5 === 0),
+      repairSnapshots.every((snapshot) => snapshot.labels.length === 0),
+    ).toBe(true);
+    expect(
+      result.snapshots.find((snapshot) => snapshot.phase === "labels")?.labels,
+    ).toHaveLength(1);
+    expect(
+      repairSnapshots
+        .slice(1)
+        .every(
+          (snapshot) =>
+            snapshot.iteration % 5 === 0 ||
+            snapshot.iteration === result.iterations,
+        ),
     ).toBe(true);
   });
 

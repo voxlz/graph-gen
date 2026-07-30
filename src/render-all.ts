@@ -1,9 +1,9 @@
 // render-all.ts
 // Renders every example graph into renders/, mirroring the source folder:
-//   graph.ggn                 -> renders/graph.png, renders/graph_cola.png
-//   demo/showcase/overlap.ggn -> renders/demo/showcase/overlap.png, ..._cola.png
-//   scopes/asrv_scope.ggn     -> renders/scopes/asrv_scope.png, ..._cola.png
-//   example/parsedGraph...json-> renders/example/parsedGraphExample.png, ..._cola.png
+//   graph.ggn                 -> renders/graph.png, ..._cola.png, ..._force.png
+//   demo/showcase/overlap.ggn -> renders/demo/showcase/overlap.png and variants
+//   scopes/asrv_scope.ggn     -> renders/scopes/asrv_scope.png and variants
+//   example/parsedGraph...json-> renders/example/parsedGraphExample.png and variants
 // Usage: tsx src/render-all.ts
 
 import { execFileSync } from "node:child_process";
@@ -105,6 +105,7 @@ for (const input of inputs) {
   const outputs = [
     path.join(destDir, `${base}.${ext}`),
     path.join(destDir, `${base}_cola.${ext}`),
+    path.join(destDir, `${base}_force.${ext}`),
   ];
   const inputFingerprint = fingerprint(importedFiles(input), renderFingerprint);
   if (
@@ -117,6 +118,7 @@ for (const input of inputs) {
   for (const [layout, suffix] of [
     ["constraint", ""],
     ["cola", "_cola"],
+    ["force", "_force"],
   ] as const) {
     const output = path.join(destDir, `${base}${suffix}.${ext}`);
     // index.ts formats every DSL input before parsing and rendering it.

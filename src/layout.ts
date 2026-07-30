@@ -60,10 +60,12 @@ export interface LayoutOptions {
   stableIterations?: number;
   debugFrameEvery?: number;
   minimizeIterations?: number;
+  preserveInitialPositions?: boolean;
 }
 
 export interface LayoutSnapshot {
   iteration: number;
+  phase: "force" | "repair" | "labels" | "final";
   violations: number;
   nodes: Array<Pick<LayoutNode, "id" | "x" | "y" | "width" | "height">>;
   groups: Array<{ id: string; rect: LayoutRect | null }>;
@@ -1359,10 +1361,12 @@ function captureSnapshot(
   iteration: number,
   violations: number,
   placements: LabelPlacement[],
+  phase: LayoutSnapshot["phase"] = "repair",
 ): LayoutSnapshot {
   const rects = allGroupRects(ctx);
   return {
     iteration,
+    phase,
     violations,
     nodes: ctx.nodes.map(({ id, x, y, width, height }) => ({
       id,
@@ -1430,14 +1434,12 @@ export function solveLayout(
   options: LayoutOptions,
 ): LayoutResult {
   const ctx = makeContext(nodes, boundaries, edges, constraints, options);
-  initializeGrid(ctx);
+  if (!options.preserveInitialPositions) initializeGrid(ctx);
   const snapshots: LayoutSnapshot[] = [];
   const every = Math.max(0, Math.floor(options.debugFrameEvery ?? 0));
   let check = collectViolations(ctx);
   if (every > 0) {
-    snapshots.push(
-      captureSnapshot(ctx, 0, check.messages.length, check.placements),
-    );
+    snapshots.push(captureSnapshot(ctx, 0, check.messages.length, []));
   }
   let stable = 0;
   let iteration = 0;
@@ -1455,17 +1457,28 @@ export function solveLayout(
     stable = check.messages.length === 0 ? stable + 1 : 0;
     if (every > 0 && iteration % every === 0) {
       snapshots.push(
-        captureSnapshot(
-          ctx,
-          iteration,
-          check.messages.length,
-          check.placements,
-        ),
+        captureSnapshot(ctx, iteration, check.messages.length, []),
       );
     }
     if (stable >= stableTarget) break;
   }
   const completedIterations = Math.min(iteration, options.iterations);
+  if (every > 0 && snapshots.at(-1)?.iteration !== completedIterations) {
+    snapshots.push(
+      captureSnapshot(ctx, completedIterations, check.messages.length, []),
+    );
+  }
+  if (every > 0 && check.placements.length > 0) {
+    snapshots.push(
+      captureSnapshot(
+        ctx,
+        completedIterations,
+        check.messages.length,
+        check.placements,
+        "labels",
+      ),
+    );
+  }
   if (check.messages.length === 0) {
     const minimizeIterations = Math.max(
       0,
@@ -1595,12 +1608,9 @@ export function solveLayout(
       completedIterations,
       check.messages.length,
       check.placements,
+      "final",
     );
-    if (snapshots.at(-1)?.iteration === completedIterations) {
-      snapshots[snapshots.length - 1] = finalSnapshot;
-    } else {
-      snapshots.push(finalSnapshot);
-    }
+    snapshots.push(finalSnapshot);
   }
   return {
     valid: check.messages.length === 0,
