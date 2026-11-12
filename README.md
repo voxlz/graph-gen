@@ -290,20 +290,21 @@ styles; only the file being rendered contributes edges.
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
 
-### Layout engines: custom constraint vs cola
+### Layout engines: cola vs custom constraint
 
 Set `graph.layout` to choose how nodes are positioned:
 
-- `constraint` (default) — custom engine focused on predictable constraints and
+- `cola` (default) — WebCola layout pass.
+- `constraint` — custom engine focused on predictable constraints and
   explicit validation of constraints and overlap rules.
-- `cola` — legacy WebCola-only layout pass.
+- `force` — force-directed layout.
 
 If the same setting appears in multiple places, this precedence applies:
 
 1. `GRAPHGEN_LAYOUT` environment variable
 2. per-graph `graph { layout "..." }`
 3. global style `style.jsonc` (`graph.layout`)
-4. default `constraint`
+4. default `cola`
 
 Examples:
 
@@ -312,7 +313,7 @@ Global default in `style.jsonc`:
 ```jsonc
 {
   "graph": {
-    "layout": "constraint",
+    "layout": "cola",
   },
 }
 ```

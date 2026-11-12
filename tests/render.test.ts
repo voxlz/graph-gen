@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import * as cola from "webcola";
 import { emptyGraphSpec } from "../src/parse";
 import {
   formatEdgeLabel,
@@ -23,6 +24,30 @@ describe("renderGraph", () => {
       expect(result.height).toBeGreaterThan(0);
       expect(fs.statSync(output).size).toBeGreaterThan(0);
     } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the Cola layout by default", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graphgen-render-cola-default-"),
+    );
+    const output = path.join(directory, "graph.png");
+    const previousLayout = process.env.GRAPHGEN_LAYOUT;
+    const start = jest.spyOn(cola.Layout.prototype, "start");
+    delete process.env.GRAPHGEN_LAYOUT;
+
+    try {
+      await renderGraph(emptyGraphSpec(), output);
+
+      expect(start).toHaveBeenCalled();
+    } finally {
+      start.mockRestore();
+      if (previousLayout === undefined) {
+        delete process.env.GRAPHGEN_LAYOUT;
+      } else {
+        process.env.GRAPHGEN_LAYOUT = previousLayout;
+      }
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });

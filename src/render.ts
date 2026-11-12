@@ -329,7 +329,7 @@ export async function renderGraph(
       process.env.GRAPHGEN_LAYOUT ??
         spec.graph?.layout ??
         globalStyle.graph?.layout ??
-        "constraint",
+        "cola",
     ).toLowerCase(),
     layoutIterations: Number(
       process.env.GRAPHGEN_LAYOUT_ITERS ??

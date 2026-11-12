@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.5
+
+- Make Cola the default layout engine; `constraint` and `force` remain available
+  through `graph.layout` or `GRAPHGEN_LAYOUT`.
+
 ## v3.0.3
 
 - Watch mode now respects graph-local and global default output paths when no output directory is supplied.

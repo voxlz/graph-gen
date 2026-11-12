@@ -9,7 +9,7 @@
     "labelBand": 20, // extra top room inside a boundary for its label
     "nestPad": 36, // extra padding per nesting level (parent label clears nested border)
     "iterations": [0, 100, 1000], // WebCola solver passes [unconstrained, userConstraint, allConstraint]
-    "layout": "constraint", // "constraint" (default), "force", or legacy "cola"
+    "layout": "cola", // "cola" (default), "constraint", or "force"
     "layoutIterations": 1000, // hard limit for the constraint solver
     "minimize": 100, // post-layout generations that compact valid layouts toward the center
     "debugFrameEvery": 0, // set to 5 to write a PNG every five solver iterations
