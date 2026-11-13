@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v4.2.0
 
 - Edge label lines wider than the new `labelMaxWidth` graph setting (default
   220 px) are wrapped at spaces.
