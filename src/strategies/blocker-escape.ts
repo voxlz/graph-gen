@@ -1,4 +1,3 @@
-import type { LayoutNode } from "../layout";
 import { minimizeTowardCenter } from "./center";
 import {
   compactness,

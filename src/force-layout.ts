@@ -256,7 +256,6 @@ export function applyForceLayout(
       if (siblings.length < 2) continue;
       const applyOutlierPressure = (axis: "x" | "y", direction: -1 | 1) => {
         const start = axis === "x" ? "minX" : "minY";
-        const end = axis === "x" ? "maxX" : "maxY";
         const ordered = [...siblings].sort(
           (a, b) =>
             direction * (a.rect[start] - b.rect[start]) ||
@@ -278,7 +277,7 @@ export function applyForceLayout(
       applyOutlierPressure("y", -1);
     }
 
-    for (const [parent, children] of entitiesByParent) {
+    for (const children of entitiesByParent.values()) {
       if (children.length < 2) continue;
       const parentCenter = center(
         rectFor(children.flatMap((child) => child.nodes)),
