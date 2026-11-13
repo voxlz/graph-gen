@@ -344,6 +344,13 @@ edge lengths, crossings, edges through nodes, label collisions, and layout time.
 `BENCH_FILTER` limits the graphs, `BENCH_JOBS=1` gives reliable timings, and
 Cola results are cached (`BENCH_FRESH=1` re-renders them).
 
+For faster renders, `npm run build` precompiles the renderer into
+`dist/index.js`; run it with `node dist/index.js <input> [output]` instead of
+`tsx src/index.ts` to skip TypeScript transpilation on every run. The watcher,
+`render-all`, `generate` and the benchmark do this automatically, rebuilding
+the bundle when the source changes, and the watcher renders up to four changed
+graphs in parallel.
+
 A graph's own `shapes { ... }` block overrides global shape defaults for that
 graph only, and a custom style file can be passed per render (the optional third
 CLI argument).

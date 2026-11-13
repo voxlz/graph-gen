@@ -17,8 +17,10 @@ RUN npm install --omit=dev --ignore-scripts && npm rebuild canvas --build-from-s
 COPY src ./src
 COPY style.jsonc ./
 COPY demo ./demo
+# Precompile so each render skips TypeScript transpilation (see src/bundle.ts).
+RUN npx tsx src/bundle.ts
 
 # Usage:
 #   docker run -v $(pwd)/out:/app/out graphgen demo/usecases/bookstore_uc1.ggn out/output.png
-ENTRYPOINT ["npx", "tsx", "src/index.ts"]
+ENTRYPOINT ["node", "dist/index.js"]
 CMD ["demo/usecases/bookstore_uc1.ggn", "output.png"]

@@ -4,6 +4,7 @@ node_modules/
 # Generated output
 renders/*
 release-artifacts/
+dist/
 output.png
 *.png
 

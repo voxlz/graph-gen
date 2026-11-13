@@ -5,9 +5,14 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { rendererCommand } from "./bundle";
 
-const indexScript = path.join(__dirname, "index.ts");
-const tsxBin = path.join(__dirname, "..", "node_modules", ".bin", "tsx");
+// Resolved on first use, so importing this module never builds the bundle.
+let cachedRenderer: ReturnType<typeof rendererCommand> | null = null;
+function renderer() {
+  cachedRenderer ??= rendererCommand();
+  return cachedRenderer;
+}
 
 export type Rect = { minX: number; minY: number; maxX: number; maxY: number };
 export type Metrics = {
@@ -262,8 +267,8 @@ export function renderAndMeasure(
   const start = Date.now();
   return new Promise((resolve) => {
     execFile(
-      tsxBin,
-      [indexScript, file, png],
+      renderer().command,
+      [...renderer().args, file, png],
       {
         env: {
           ...process.env,

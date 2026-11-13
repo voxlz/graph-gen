@@ -3,7 +3,9 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { rendererCommand } from "./bundle";
 import { parseGraphText } from "./parse";
 
 const rootDir = path.resolve(__dirname, "..");
@@ -88,14 +90,25 @@ function printError(message: string) {
   process.stderr.write(`${RED}${message}${RESET}`);
 }
 
-function renderGraph(file: string, outputDirectory?: string): Promise<void> {
+// Graphs rendered at the same time: renders are independent processes, so a
+// change to a shared scope re-renders all its use cases in parallel.
+const MAX_PARALLEL_RENDERS = Math.max(
+  1,
+  Math.min(4, (os.availableParallelism?.() ?? os.cpus().length) - 1),
+);
+
+function renderGraph(
+  renderer: { command: string; args: string[] },
+  file: string,
+  outputDirectory?: string,
+): Promise<void> {
   const output = outputPathFor(file, outputDirectory);
   if (output) fs.mkdirSync(path.dirname(output), { recursive: true });
 
   return new Promise((resolve) => {
-    const args = [path.join(__dirname, "index.ts"), file];
+    const args = [...renderer.args, file];
     if (output) args.push(output);
-    const child = spawn("tsx", args, {
+    const child = spawn(renderer.command, args, {
       cwd: rootDir,
       // Hint about constraints that block a smaller layout while editing.
       env: {
@@ -141,20 +154,24 @@ export function startWatch(
     ? target
     : path.dirname(target);
   const watchedFile = targetStat.isFile() ? target : undefined;
+  const renderer = rendererCommand();
   const queued = new Set<string>();
+  const rendering = new Set<string>();
   const timers = new Map<string, NodeJS.Timeout>();
-  let rendering = false;
 
-  const processQueue = async () => {
-    if (rendering) return;
-    const next = [...queued].sort()[0];
-    if (!next) return;
-
-    rendering = true;
-    queued.delete(next);
-    await renderGraph(next, outputDirectory);
-    rendering = false;
-    void processQueue();
+  // A file changed again while rendering stays queued and is rendered once
+  // more afterwards, so the last render always reflects the latest contents.
+  const processQueue = () => {
+    while (rendering.size < MAX_PARALLEL_RENDERS) {
+      const next = [...queued].sort().find((file) => !rendering.has(file));
+      if (!next) return;
+      queued.delete(next);
+      rendering.add(next);
+      void renderGraph(renderer, next, outputDirectory).then(() => {
+        rendering.delete(next);
+        processQueue();
+      });
+    }
   };
 
   const queueFile = (file: string, includeDependents = true) => {
@@ -174,7 +191,7 @@ export function startWatch(
             queueFile(dependent, false);
           }
         }
-        void processQueue();
+        processQueue();
       }, 150),
     );
   };

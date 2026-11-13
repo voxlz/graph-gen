@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { rendererCommand } from "./bundle";
 
 const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "renders");
@@ -96,6 +97,7 @@ const renderFiles = [
 ];
 const renderFingerprint = fingerprint(renderFiles);
 const cache = readCache();
+const renderer = rendererCommand();
 let rendered = 0;
 let skipped = 0;
 for (const input of inputs) {
@@ -125,7 +127,7 @@ for (const input of inputs) {
   ] as const) {
     const output = path.join(destDir, `${base}${suffix}.${ext}`);
     // index.ts formats every DSL input before parsing and rendering it.
-    execFileSync("tsx", ["src/index.ts", input, output], {
+    execFileSync(renderer.command, [...renderer.args, input, output], {
       stdio: "inherit",
       cwd: rootDir,
       env: { ...process.env, GRAPHGEN_LAYOUT: layout },

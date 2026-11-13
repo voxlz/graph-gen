@@ -7,6 +7,7 @@ export default tseslint.config(
       "renders/**",
       "release-artifacts/**",
       "examples/**",
+      "dist/**",
     ],
   },
   ...tseslint.configs.recommended,

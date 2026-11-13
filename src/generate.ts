@@ -14,6 +14,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { rendererCommand } from "./bundle";
 
 const args = process.argv.slice(2);
 
@@ -29,6 +30,7 @@ for (let i = 0; i < args.length; i += 2) {
   pairs.push({ input: args[i], output: args[i + 1] });
 }
 
+const renderer = rendererCommand();
 let failures = 0;
 for (const { input, output } of pairs) {
   if (!fs.existsSync(input)) {
@@ -39,7 +41,7 @@ for (const { input, output } of pairs) {
   const outDir = path.dirname(output);
   if (outDir && outDir !== ".") fs.mkdirSync(outDir, { recursive: true });
   try {
-    execFileSync("tsx", [path.join(__dirname, "index.ts"), input, output], {
+    execFileSync(renderer.command, [...renderer.args, input, output], {
       stdio: "inherit",
       cwd: path.resolve(__dirname, ".."),
     });

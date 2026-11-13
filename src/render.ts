@@ -994,9 +994,14 @@ export async function renderGraph(
     const length = lengths.reduce((sum, value) => sum + value, 0);
     const longest = Math.max(0, ...lengths);
     let crossings = 0;
+    const crossingPairs: Array<[number, number]> = [];
     routes.forEach((route, i) => {
       for (let j = i + 1; j < routes.length; j++) {
-        crossings += polylineCrossings(route.points, routes[j].points);
+        const count = polylineCrossings(route.points, routes[j].points);
+        if (count > 0) {
+          crossings += count;
+          crossingPairs.push([i, j]);
+        }
       }
     });
     const hitEdges =
@@ -1016,16 +1021,6 @@ export async function renderGraph(
         // A crossing or an edge through a node outweighs any size difference.
         penalty
       : 0;
-    const crossingPairs: Array<[number, number]> = [];
-    if (crossings > 0) {
-      routes.forEach((route, i) => {
-        for (let j = i + 1; j < routes.length; j++) {
-          if (polylineCrossings(route.points, routes[j].points) > 0) {
-            crossingPairs.push([i, j]);
-          }
-        }
-      });
-    }
     return {
       area,
       length,

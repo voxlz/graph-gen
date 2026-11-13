@@ -151,11 +151,32 @@ export function polylineLength(points: Pt[]): number {
   return total;
 }
 
+// A proper crossing lies inside both segments' bounding boxes, so segment
+// pairs whose boxes are apart (by more than a rounding margin) are skipped
+// before the exact orientation test.
+const CROSS_MARGIN = 0.01;
+
 export function polylineCrossings(p: Pt[], q: Pt[]): number {
   let count = 0;
   for (let i = 1; i < p.length; i++) {
+    const a = p[i - 1];
+    const b = p[i];
+    const pMinX = Math.min(a.x, b.x) - CROSS_MARGIN;
+    const pMaxX = Math.max(a.x, b.x) + CROSS_MARGIN;
+    const pMinY = Math.min(a.y, b.y) - CROSS_MARGIN;
+    const pMaxY = Math.max(a.y, b.y) + CROSS_MARGIN;
     for (let j = 1; j < q.length; j++) {
-      if (segmentsCross(p[i - 1], p[i], q[j - 1], q[j])) count++;
+      const c = q[j - 1];
+      const d = q[j];
+      if (
+        (c.x < pMinX && d.x < pMinX) ||
+        (c.x > pMaxX && d.x > pMaxX) ||
+        (c.y < pMinY && d.y < pMinY) ||
+        (c.y > pMaxY && d.y > pMaxY)
+      ) {
+        continue;
+      }
+      if (segmentsCross(a, b, c, d)) count++;
     }
   }
   return count;
