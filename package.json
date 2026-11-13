@@ -1,6 +1,6 @@
 {
   "name": "graphgen",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Constraint-based graph layout -> PNG renderer",
   "main": "src/index.ts",
   "type": "commonjs",

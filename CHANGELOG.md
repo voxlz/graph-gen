@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.1.0
+
+- New `--watch` (`-w`) flag: `graphgen --watch [path] [output-directory]`
+  re-renders graphs on save, also from the Docker image.
+- New `--help` (`-h`) and `--version` (`-v`) flags. Unknown options now fail
+  with exit code 2.
+
 ## v4.0.0
 
 - **Breaking:** `curved` is the new default layout engine (was `cola`). Set
