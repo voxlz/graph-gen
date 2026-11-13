@@ -2,16 +2,22 @@
 
 ## v4.2.0
 
-- Edge label lines wider than the new `labelMaxWidth` graph setting (default
-  220 px) are wrapped at spaces.
 - Edge labels in the `curved` and `orthogonal` layouts now touch their own
-  edge (centred on it where there is room) and keep clear of nodes, so
-  arrowheads stay visible. With `curved`, an edge whose label has no room
-  beside it bends to reach the label instead. Curves and labels stay inside
-  the layout where they can, and the image always includes them.
-- New `labelNodes` graph setting (`GRAPHGEN_LABEL_NODES`): with the `curved`
-  layout, labels that can't touch their edge otherwise are laid out as nodes
-  that push other nodes away. `auto` (default), `true` or `false`.
+  edge: centred on it where there is room, otherwise beside it with the edge
+  still passing through the label's middle. Labels keep an arrowhead's
+  clearance from nodes and stay clear of other labels and edges.
+- With `curved`, an edge whose label has no room beside it bends to reach the
+  label, without moving any node.
+- New `labelNodes` graph setting (`GRAPHGEN_LABEL_NODES`): with `curved`,
+  labels that still can't touch their edge, or that would stick out of the
+  layout, are laid out as nodes that push other nodes away and have their edge
+  routed through them. `auto` (default) does this only for those labels,
+  `true` for every label, `false` never.
+- Curves are kept inside the layout where possible, and the image now always
+  includes every edge and label (they could be cut off before).
+- Edge label lines wider than the new `labelMaxWidth` graph setting (default
+  220 px, `0` to turn off) are wrapped at spaces, in every layout engine.
+- Benchmark: `labelLines` no longer counts a label crossed by its own edge.
 
 ## v4.1.0
 
