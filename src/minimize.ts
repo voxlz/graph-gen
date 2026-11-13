@@ -5,6 +5,7 @@ import { minimizeEdgeLengths } from "./strategies/edge-shortening";
 import { minimizeNodeSwaps } from "./strategies/node-swap";
 import { minimizeSharedHubCompaction } from "./strategies/shared-hub-compaction";
 import { minimizeElementAlignment } from "./strategies/element-alignment";
+import { minimizeRelocation } from "./strategies/relocation";
 import {
   angularReadabilityWeight,
   angularRelaxationScore,
@@ -25,6 +26,8 @@ export type {
   MinimizeObstacle,
   MinimizeOptions,
 } from "./strategies/types";
+
+const MIN_CYCLE_GAIN = 0.005;
 
 export function minimizeLayout(options: MinimizeOptions): void {
   for (let cycle = 0; cycle < options.generations; cycle++) {
@@ -154,10 +157,17 @@ export function minimizeLayout(options: MinimizeOptions): void {
             elementAreaImproved)))
     ) {
       for (const frame of cycleFrames) options.onIteration?.(frame);
+      // Later cycles rarely gain much but cost as much as the first one.
+      const marginal =
+        candidateScore!.area > baselineScore.area * (1 - MIN_CYCLE_GAIN) &&
+        candidateScore!.edgeLength >
+          baselineScore.edgeLength * (1 - MIN_CYCLE_GAIN);
+      if (marginal) break;
       continue;
     }
     restore(options.nodes, baselinePositions);
     break;
   }
+  minimizeRelocation(options);
   options.measure();
 }

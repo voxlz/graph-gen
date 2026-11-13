@@ -1,3 +1,4 @@
+import { Constraint as VpscConstraint, Solver, Variable } from "webcola";
 import {
   minimizeLayout,
   type MinimizeMeasure,
@@ -61,6 +62,14 @@ export interface LayoutOptions {
   debugFrameEvery?: number;
   minimizeIterations?: number;
   preserveInitialPositions?: boolean;
+  // With routed edges (curved/orthogonal) the router keeps edges clear of
+  // nodes, so the layout only enforces node, boundary and directional rules.
+  edgeRouting?: "straight" | "curved" | "orthogonal";
+  // Replace the iterative minimiser with one-pass compaction (see compactAxis).
+  // Only valid when edges are routed, since it ignores edge geometry.
+  fastCompaction?: boolean;
+  // Pull toward the container centre during compaction, relative to one edge.
+  compactCenterPull?: number;
 }
 
 export interface LayoutSnapshot {
@@ -99,6 +108,10 @@ interface LayoutContext {
   members: Map<string, number[]>;
   alignments: Record<"x" | "y", LayoutNode[][]>;
   maxDepth: number;
+  // Static lookups derived once per solve (graph structure never changes).
+  edgeEnds: Array<[number, number]>;
+  memberSets: Map<string, Set<number>>;
+  unrelatedBoundaryPairs: Array<[string, string]>;
 }
 
 interface Segment {
@@ -181,15 +194,33 @@ function rectanglesOverlap(a: LayoutRect, b: LayoutRect): boolean {
   );
 }
 
+function orient(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+function onSegment(
+  pointX: number,
+  pointY: number,
+  segment: Segment,
+  orientation: number,
+): boolean {
+  return (
+    Math.abs(orientation) <= EPSILON &&
+    pointX >= Math.min(segment.x1, segment.x2) - EPSILON &&
+    pointX <= Math.max(segment.x1, segment.x2) + EPSILON &&
+    pointY >= Math.min(segment.y1, segment.y2) - EPSILON &&
+    pointY <= Math.max(segment.y1, segment.y2) + EPSILON
+  );
+}
+
 function segmentsCross(a: Segment, b: Segment): boolean {
-  const orient = (
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-    cx: number,
-    cy: number,
-  ) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
   const a1 = orient(a.x1, a.y1, a.x2, a.y2, b.x1, b.y1);
   const a2 = orient(a.x1, a.y1, a.x2, a.y2, b.x2, b.y2);
   const b1 = orient(b.x1, b.y1, b.x2, b.y2, a.x1, a.y1);
@@ -198,17 +229,6 @@ function segmentsCross(a: Segment, b: Segment): boolean {
     ((a1 > EPSILON && a2 < -EPSILON) || (a1 < -EPSILON && a2 > EPSILON)) &&
     ((b1 > EPSILON && b2 < -EPSILON) || (b1 < -EPSILON && b2 > EPSILON));
   if (properCrossing) return true;
-  const onSegment = (
-    pointX: number,
-    pointY: number,
-    segment: Segment,
-    orientation: number,
-  ) =>
-    Math.abs(orientation) <= EPSILON &&
-    pointX >= Math.min(segment.x1, segment.x2) - EPSILON &&
-    pointX <= Math.max(segment.x1, segment.x2) + EPSILON &&
-    pointY >= Math.min(segment.y1, segment.y2) - EPSILON &&
-    pointY <= Math.max(segment.y1, segment.y2) + EPSILON;
   return (
     onSegment(b.x1, b.y1, a, a1) ||
     onSegment(b.x2, b.y2, a, a2) ||
@@ -218,27 +238,37 @@ function segmentsCross(a: Segment, b: Segment): boolean {
 }
 
 function segmentIntersectsRect(segment: Segment, rect: LayoutRect): boolean {
-  let low = 0;
-  let high = 1;
   const dx = segment.x2 - segment.x1;
   const dy = segment.y2 - segment.y1;
-  const clips: Array<[number, number]> = [
-    [-dx, segment.x1 - rect.minX],
-    [dx, rect.maxX - segment.x1],
-    [-dy, segment.y1 - rect.minY],
-    [dy, rect.maxY - segment.y1],
-  ];
-  for (const [direction, distance] of clips) {
-    if (Math.abs(direction) < EPSILON) {
-      if (distance < 0) return false;
-      continue;
-    }
-    const ratio = distance / direction;
-    if (direction < 0) low = Math.max(low, ratio);
-    else high = Math.min(high, ratio);
-    if (low > high) return false;
-  }
-  return true;
+  const clip = { low: 0, high: 1 };
+  return (
+    clipAxis(-dx, segment.x1 - rect.minX, clip) &&
+    clipAxis(dx, rect.maxX - segment.x1, clip) &&
+    clipAxis(-dy, segment.y1 - rect.minY, clip) &&
+    clipAxis(dy, rect.maxY - segment.y1, clip)
+  );
+}
+
+// One Liang–Barsky clipping step; returns false once the segment is rejected.
+function clipAxis(
+  direction: number,
+  distance: number,
+  clip: { low: number; high: number },
+): boolean {
+  if (Math.abs(direction) < EPSILON) return distance >= 0;
+  const ratio = distance / direction;
+  if (direction < 0) clip.low = Math.max(clip.low, ratio);
+  else clip.high = Math.min(clip.high, ratio);
+  return clip.low <= clip.high;
+}
+
+function segmentBoundsMiss(segment: Segment, rect: LayoutRect): boolean {
+  return (
+    Math.max(segment.x1, segment.x2) < rect.minX ||
+    Math.min(segment.x1, segment.x2) > rect.maxX ||
+    Math.max(segment.y1, segment.y2) < rect.minY ||
+    Math.min(segment.y1, segment.y2) > rect.maxY
+  );
 }
 
 function nodeRect(node: LayoutNode, padding = 0): LayoutRect {
@@ -333,7 +363,7 @@ function boundaryDepth(ctx: LayoutContext, boundaryId: string): number {
 }
 
 function belongsTo(ctx: LayoutContext, nodeIndex: number, boundaryId: string) {
-  return ctx.members.get(boundaryId)?.includes(nodeIndex) ?? false;
+  return ctx.memberSets.get(boundaryId)?.has(nodeIndex) ?? false;
 }
 
 function isAncestor(ctx: LayoutContext, ancestor: string, child: string) {
@@ -439,7 +469,9 @@ function edgeSegment(edge: LayoutEdge, ctx: LayoutContext): Segment {
   return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
 }
 
-function initializeGrid(ctx: LayoutContext) {
+// Variant 0 is the default square grid; other variants change the column count
+// and item order to give the repair loop a different starting point.
+function initializeGrid(ctx: LayoutContext, variant = 0) {
   const directNodes = new Map<string | null, number[]>();
   for (const [index, node] of ctx.nodes.entries()) {
     const key = node.boundaryParent ?? null;
@@ -467,7 +499,14 @@ function initializeGrid(ctx: LayoutContext) {
       if (rect) items.push({ id, rect });
     }
     if (items.length === 0) return;
-    const columns = Math.ceil(Math.sqrt(items.length));
+    if (variant % 2 === 1) items.reverse();
+    const columns = Math.max(
+      1,
+      Math.min(
+        items.length,
+        Math.ceil(Math.sqrt(items.length)) + Math.floor(variant / 2),
+      ),
+    );
     const rows = Math.ceil(items.length / columns);
     const cellWidth =
       Math.max(...items.map(({ rect }) => rect.maxX - rect.minX)) +
@@ -1077,11 +1116,13 @@ function resolveEdgeCrossings(ctx: LayoutContext) {
 
 function placeLabels(ctx: LayoutContext): LabelPlacement[] {
   const placements: LabelPlacement[] = [];
+  const segments = ctx.edges.map((edge) => edgeSegment(edge, ctx));
+  const nodeRects = ctx.nodes.map((node) => nodeRect(node, 2));
   for (const [edgeIndex, edge] of ctx.edges.entries()) {
     if (!edge.label || !edge.labelWidth || !edge.labelHeight) continue;
-    const segment = edgeSegment(edge, ctx);
+    const segment = segments[edgeIndex];
     const normal = lineNormal(segment);
-    const [sourceIndex, targetIndex] = edgeNodeIndices(edge, ctx);
+    const [sourceIndex, targetIndex] = ctx.edgeEnds[edgeIndex];
     const endpointClearance =
       Math.max(
         ...[sourceIndex, targetIndex].map((index) => {
@@ -1113,16 +1154,18 @@ function placeLabels(ctx: LayoutContext): LabelPlacement[] {
             minY: y - edge.labelHeight / 2 - 2,
             maxY: y + edge.labelHeight / 2 + 2,
           };
-          const nodeCollisions = ctx.nodes.filter((node) =>
-            rectanglesOverlap(rect, nodeRect(node, 2)),
+          const nodeCollisions = nodeRects.filter((nodeBox) =>
+            rectanglesOverlap(rect, nodeBox),
           ).length;
           const labelCollisions = placements.filter((placement) =>
             rectanglesOverlap(rect, expandRect(placement.rect, 2)),
           ).length;
-          const lineCollisions = ctx.edges.filter((other, index) => {
-            if (index === edgeIndex) return false;
-            return segmentIntersectsRect(edgeSegment(other, ctx), rect);
-          }).length;
+          const lineCollisions = segments.filter(
+            (other, index) =>
+              index !== edgeIndex &&
+              !segmentBoundsMiss(other, rect) &&
+              segmentIntersectsRect(other, rect),
+          ).length;
           candidates.push({
             edge: edgeIndex,
             rect,
@@ -1153,17 +1196,24 @@ function placeLabels(ctx: LayoutContext): LabelPlacement[] {
   return placements;
 }
 
+// Collects every rule the layout breaks. With stopAtFirst the scan ends at the
+// first violation, which is all validity checks in the minimizer need.
 function collectViolations(
   ctx: LayoutContext,
   includeLabels = true,
+  stopAtFirst = false,
 ): {
   messages: string[];
   placements: LabelPlacement[];
 } {
   const messages: string[] = [];
+  const limit = stopAtFirst ? 1 : 50;
   const add = (message: string) => {
-    if (messages.length < 50) messages.push(message);
+    if (messages.length < limit) messages.push(message);
   };
+  const done = () => stopAtFirst && messages.length > 0;
+  const result = () => ({ messages, placements: [] as LabelPlacement[] });
+
   for (const axis of ["x", "y"] as const) {
     for (const nodes of ctx.alignments[axis]) {
       const coordinate = nodes[0][axis];
@@ -1171,9 +1221,11 @@ function collectViolations(
         add(
           `alignment constraint ${axis} ${nodes.map((node) => node.id).join(" / ")}`,
         );
+        if (done()) return result();
       }
     }
   }
+  const directionalGap = Math.max(ctx.options.minGap, ctx.options.nodeGap);
   for (const constraint of ctx.constraints) {
     if (constraint.type === "near" || constraint.type === "align") continue;
     const aId = constraint.a ?? constraint.left ?? constraint.top;
@@ -1186,93 +1238,100 @@ function collectViolations(
       constraint.type,
       a,
       b,
-      Math.max(ctx.options.minGap, ctx.options.nodeGap),
+      directionalGap,
     );
     if (
       Math.abs(correction.dx) > EPSILON ||
       Math.abs(correction.dy) > EPSILON
     ) {
       add(`directional constraint ${aId} ${constraint.type} ${bId}`);
+      if (done()) return result();
     }
   }
 
   const padding = ctx.options.nodeGap / 2;
+  const paddedNodes = ctx.nodes.map((node) => nodeRect(node, padding));
   for (let first = 0; first < ctx.nodes.length; first++) {
     for (let second = first + 1; second < ctx.nodes.length; second++) {
-      if (
-        rectanglesOverlap(
-          nodeRect(ctx.nodes[first], padding),
-          nodeRect(ctx.nodes[second], padding),
-        )
-      ) {
+      if (rectanglesOverlap(paddedNodes[first], paddedNodes[second])) {
         add(`node clearance ${ctx.nodes[first].id} / ${ctx.nodes[second].id}`);
+        if (done()) return result();
       }
     }
   }
 
   const rects = allGroupRects(ctx);
-  for (let first = 0; first < ctx.boundaries.length; first++) {
-    for (let second = first + 1; second < ctx.boundaries.length; second++) {
-      const a = ctx.boundaries[first];
-      const b = ctx.boundaries[second];
-      if (isAncestor(ctx, a.id, b.id) || isAncestor(ctx, b.id, a.id)) continue;
-      const ar = rects.get(a.id);
-      const br = rects.get(b.id);
-      if (ar && br && rectanglesOverlap(ar, br)) {
-        add(`group overlap ${a.id} / ${b.id}`);
-      }
+  for (const [aId, bId] of ctx.unrelatedBoundaryPairs) {
+    const ar = rects.get(aId);
+    const br = rects.get(bId);
+    if (ar && br && rectanglesOverlap(ar, br)) {
+      add(`group overlap ${aId} / ${bId}`);
+      if (done()) return result();
     }
   }
   for (const boundary of ctx.boundaries) {
     const rect = rects.get(boundary.id);
     if (!rect) continue;
+    const members = ctx.memberSets.get(boundary.id);
     for (let index = 0; index < ctx.nodes.length; index++) {
-      if (belongsTo(ctx, index, boundary.id)) continue;
-      if (rectanglesOverlap(rect, nodeRect(ctx.nodes[index], padding))) {
+      if (members?.has(index)) continue;
+      if (rectanglesOverlap(rect, paddedNodes[index])) {
         add(`node ${ctx.nodes[index].id} intersects group ${boundary.id}`);
+        if (done()) return result();
       }
     }
   }
 
-  for (const [edgeIndex, edge] of ctx.edges.entries()) {
-    const [source, target] = edgeNodeIndices(edge, ctx);
-    const segment = edgeSegment(edge, ctx);
+  if (routesEdges(ctx)) return { messages, placements: [] };
+
+  const segments = ctx.edges.map((edge) => edgeSegment(edge, ctx));
+  const clearanceNodes = ctx.nodes.map((node) =>
+    nodeRect(node, NODE_EDGE_CLEARANCE),
+  );
+  for (let edgeIndex = 0; edgeIndex < ctx.edges.length; edgeIndex++) {
+    const [source, target] = ctx.edgeEnds[edgeIndex];
+    const segment = segments[edgeIndex];
     for (let index = 0; index < ctx.nodes.length; index++) {
       if (index === source || index === target) continue;
-      if (
-        segmentIntersectsRect(
-          segment,
-          nodeRect(ctx.nodes[index], NODE_EDGE_CLEARANCE),
-        )
-      ) {
+      const rect = clearanceNodes[index];
+      if (segmentBoundsMiss(segment, rect)) continue;
+      if (segmentIntersectsRect(segment, rect)) {
         add(`edge ${edgeIndex + 1} intersects node ${ctx.nodes[index].id}`);
+        if (done()) return result();
       }
     }
     for (const boundary of ctx.boundaries) {
-      if (
-        belongsTo(ctx, source, boundary.id) ||
-        belongsTo(ctx, target, boundary.id)
-      ) {
-        continue;
-      }
+      const members = ctx.memberSets.get(boundary.id);
+      if (members?.has(source) || members?.has(target)) continue;
       const rect = rects.get(boundary.id);
-      if (rect && segmentIntersectsRect(segment, rect)) {
+      if (
+        rect &&
+        !segmentBoundsMiss(segment, rect) &&
+        segmentIntersectsRect(segment, rect)
+      ) {
         add(`edge ${edgeIndex + 1} intersects group ${boundary.id}`);
+        if (done()) return result();
       }
     }
   }
   for (let first = 0; first < ctx.edges.length; first++) {
-    const firstNodes = edgeNodeIndices(ctx.edges[first], ctx);
+    const [a1, a2] = ctx.edgeEnds[first];
+    const p = segments[first];
     for (let second = first + 1; second < ctx.edges.length; second++) {
-      const secondNodes = edgeNodeIndices(ctx.edges[second], ctx);
-      if (firstNodes.some((node) => secondNodes.includes(node))) continue;
+      const [b1, b2] = ctx.edgeEnds[second];
+      if (a1 === b1 || a1 === b2 || a2 === b1 || a2 === b2) continue;
+      const q = segments[second];
       if (
-        segmentsCross(
-          edgeSegment(ctx.edges[first], ctx),
-          edgeSegment(ctx.edges[second], ctx),
-        )
+        Math.max(p.x1, p.x2) < Math.min(q.x1, q.x2) - EPSILON ||
+        Math.max(q.x1, q.x2) < Math.min(p.x1, p.x2) - EPSILON ||
+        Math.max(p.y1, p.y2) < Math.min(q.y1, q.y2) - EPSILON ||
+        Math.max(q.y1, q.y2) < Math.min(p.y1, p.y2) - EPSILON
       ) {
+        continue;
+      }
+      if (segmentsCross(p, q)) {
         add(`edges ${first + 1} and ${second + 1} cross`);
+        if (done()) return result();
       }
     }
   }
@@ -1283,6 +1342,7 @@ function collectViolations(
     for (const placement of placements) {
       if (placement.hardCollisions > 0) {
         add(`label on edge ${placement.edge + 1} overlaps a node or label`);
+        if (done()) return { messages, placements };
       }
     }
   }
@@ -1323,7 +1383,22 @@ function makeContext(
     members,
     alignments: { x: [], y: [] },
     maxDepth: 0,
+    edgeEnds: [],
+    memberSets: new Map(
+      [...members].map(([id, indices]) => [id, new Set(indices)]),
+    ),
+    unrelatedBoundaryPairs: [],
   };
+  ctx.edgeEnds = edges.map((edge) => edgeNodeIndices(edge, ctx));
+  for (let first = 0; first < boundaries.length; first++) {
+    for (let second = first + 1; second < boundaries.length; second++) {
+      const a = boundaries[first].id;
+      const b = boundaries[second].id;
+      if (!isAncestor(ctx, a, b) && !isAncestor(ctx, b, a)) {
+        ctx.unrelatedBoundaryPairs.push([a, b]);
+      }
+    }
+  }
   ctx.alignments.x = alignmentComponents(ctx, "x");
   ctx.alignments.y = alignmentComponents(ctx, "y");
   ctx.maxDepth = boundaries.reduce(
@@ -1391,7 +1466,7 @@ function captureSnapshot(
 }
 
 function measureLayout(ctx: LayoutContext): MinimizeMeasure | null {
-  const check = collectViolations(ctx);
+  const check = collectViolations(ctx, true, true);
   if (check.messages.length > 0) return null;
   const groupRects = allGroupRects(ctx);
   const rects = [
@@ -1426,6 +1501,640 @@ function minimizationObstacles(ctx: LayoutContext): MinimizeObstacle[] {
   ];
 }
 
+function labelCollides(ctx: LayoutContext, edgeIndex: number): boolean {
+  return placeLabels(ctx).some(
+    (placement) => placement.edge === edgeIndex && placement.hardCollisions > 0,
+  );
+}
+
+// Labels are placed beside their edge; when no slot is free, lengthen the edge
+// or push the blocking nodes aside so the label gets room.
+function resolveLabelCollisions(ctx: LayoutContext) {
+  for (const placement of placeLabels(ctx)) {
+    if (placement.hardCollisions === 0) continue;
+    const edge = ctx.edges[placement.edge];
+    const [source, target] = ctx.edgeEnds[placement.edge];
+    const segment = edgeSegment(edge, ctx);
+    const length = Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1);
+    const ux = length > EPSILON ? (segment.x2 - segment.x1) / length : 1;
+    const uy = length > EPSILON ? (segment.y2 - segment.y1) / length : 0;
+    const step =
+      Math.max(edge.labelWidth ?? 0, edge.labelHeight ?? 0) / 2 +
+      ctx.options.nodeGap;
+    const blockers = ctx.nodes.flatMap((node, index) =>
+      index !== source &&
+      index !== target &&
+      rectanglesOverlap(placement.rect, nodeRect(node, 2))
+        ? [node]
+        : [],
+    );
+    const normal = lineNormal(segment);
+    chooseBestMove(
+      ctx,
+      [
+        { entity: ctx.nodes[target].id, dx: ux * step, dy: uy * step },
+        { entity: ctx.nodes[source].id, dx: -ux * step, dy: -uy * step },
+        ...blockers.flatMap((node) =>
+          [-1, 1].map((direction) => ({
+            entity: node.id,
+            dx: normal.x * direction * step,
+            dy: normal.y * direction * step,
+          })),
+        ),
+      ],
+      () => !labelCollides(ctx, placement.edge),
+    );
+  }
+}
+
+function routesEdges(ctx: LayoutContext): boolean {
+  return (ctx.options.edgeRouting ?? "straight") !== "straight";
+}
+
+// The direct child of `container` (a node or boundary id) that holds `id`, or
+// null when `id` lies outside the container.
+function itemWithin(
+  ctx: LayoutContext,
+  container: string | null,
+  id: string,
+): string | null {
+  let current: string | null = id;
+  const seen = new Set<string>();
+  while (current !== null && !seen.has(current)) {
+    seen.add(current);
+    const node = ctx.nodeById.get(current);
+    const parent: string | null = node
+      ? node.boundaryParent
+      : (ctx.boundaryById.get(current)?.parent ?? null);
+    if (parent === container) return current;
+    current = parent;
+  }
+  return null;
+}
+
+const DEFAULT_CENTER_PULL = 0.25;
+
+// Side padding between a boundary's members and its drawn rect.
+function boundaryPadding(ctx: LayoutContext, id: string): number {
+  if (ctx.boundaryById.get(id)?.draw === false) return 0;
+  return (
+    ctx.options.boundaryPad +
+    ctx.options.nestPad * (ctx.maxDepth - boundaryDepth(ctx, id))
+  );
+}
+
+// One-axis compaction: pull every item toward the nodes it connects to (and
+// weakly toward its container's centre) while keeping
+// all items that would otherwise collide in their current order, plus the
+// directional and alignment rules. Containers are processed innermost first;
+// a compacted child boundary then moves as one rigid block. The layout must be
+// valid beforehand, so the current positions are a feasible solution.
+function compactAxis(ctx: LayoutContext, axis: "x" | "y") {
+  const perp = axis === "x" ? "y" : "x";
+  const minOf = (r: LayoutRect, a: "x" | "y") => (a === "x" ? r.minX : r.minY);
+  const maxOf = (r: LayoutRect, a: "x" | "y") => (a === "x" ? r.maxX : r.maxY);
+  const directionalGap = Math.max(ctx.options.minGap, ctx.options.nodeGap);
+  const containers: Array<string | null> = [
+    ...ctx.boundaries
+      .map((boundary) => boundary.id)
+      .sort(
+        (a, b) =>
+          boundaryDepth(ctx, b) - boundaryDepth(ctx, a) || a.localeCompare(b),
+      ),
+    null,
+  ];
+  for (const container of containers) {
+    const ids = [
+      ...ctx.nodes
+        .filter((node) => node.boundaryParent === container)
+        .map((node) => node.id),
+      ...ctx.boundaries
+        .filter((boundary) => (boundary.parent ?? null) === container)
+        .map((boundary) => boundary.id),
+    ];
+    const items = ids.flatMap((id) => {
+      const rect = entityRect(ctx, id);
+      const isNode = ctx.nodeById.has(id);
+      return rect
+        ? [
+            {
+              id,
+              rect,
+              isNode,
+              padding: isNode ? 0 : boundaryPadding(ctx, id),
+            },
+          ]
+        : [];
+    });
+    if (items.length < 2) continue;
+    const index = new Map(items.map((item, i) => [item.id, i]));
+    const centers = items.map(
+      (item) => (minOf(item.rect, axis) + maxOf(item.rect, axis)) / 2,
+    );
+    const target =
+      (Math.min(...items.map((item) => minOf(item.rect, axis))) +
+        Math.max(...items.map((item) => maxOf(item.rect, axis)))) /
+      2;
+    // Each item is pulled toward the nodes its edges lead to (outside the
+    // item) and, weakly, toward the container centre.
+    const centerPull = ctx.options.compactCenterPull ?? DEFAULT_CENTER_PULL;
+    const pulls = items.map(() => ({
+      sum: target * centerPull,
+      weight: centerPull,
+    }));
+    ctx.edgeEnds.forEach(([source, target]) => {
+      for (const [inside, outside] of [
+        [source, target],
+        [target, source],
+      ]) {
+        const itemId = itemWithin(ctx, container, ctx.nodes[inside].id);
+        const item = itemId == null ? undefined : index.get(itemId);
+        if (item == null) continue;
+        if (itemWithin(ctx, container, ctx.nodes[outside].id) === itemId) {
+          continue;
+        }
+        const desired =
+          centers[item] + ctx.nodes[outside][axis] - ctx.nodes[inside][axis];
+        pulls[item].sum += desired;
+        pulls[item].weight += 1;
+      }
+    });
+    const variables = pulls.map(
+      (pull) => new Variable(pull.sum / pull.weight, pull.weight),
+    );
+    const constraints: VpscConstraint[] = [];
+    // Rules linking an item to something outside this container hold that
+    // outside entity in place, via a heavily weighted fixed variable.
+    const anchor = (position: number) => {
+      variables.push(new Variable(position, 1e6));
+      centers.push(position);
+      return variables.length - 1;
+    };
+    // Item index (anchoring outside entities) plus the entity's rect and the
+    // centre of the item it rides on.
+    const locate = (id: string) => {
+      const rect = entityRect(ctx, id);
+      if (!rect) return null;
+      const itemId = itemWithin(ctx, container, id);
+      const item = itemId == null ? undefined : index.get(itemId);
+      if (item != null) return { item, rect, center: centers[item] };
+      const center = (minOf(rect, axis) + maxOf(rect, axis)) / 2;
+      return { item: anchor(center), rect, center };
+    };
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i];
+        const b = items[j];
+        // Nodes need nodeGap between them; a boundary's padding counts towards
+        // that, but boundaries keep at least half a gap from their neighbours.
+        const clearance =
+          a.isNode && b.isNode
+            ? ctx.options.nodeGap
+            : Math.max(
+                ctx.options.nodeGap / 2,
+                ctx.options.nodeGap - a.padding - b.padding,
+              );
+        const perpGap = Math.max(
+          minOf(a.rect, perp) - maxOf(b.rect, perp),
+          minOf(b.rect, perp) - maxOf(a.rect, perp),
+        );
+        if (perpGap >= clearance - EPSILON) continue;
+        const [left, right] =
+          centers[i] < centers[j] || (centers[i] === centers[j] && a.id < b.id)
+            ? [i, j]
+            : [j, i];
+        const half = (k: number) =>
+          (maxOf(items[k].rect, axis) - minOf(items[k].rect, axis)) / 2;
+        constraints.push(
+          new VpscConstraint(
+            variables[left],
+            variables[right],
+            half(left) + half(right) + clearance,
+          ),
+        );
+      }
+    }
+    for (const constraint of ctx.constraints) {
+      const aId = constraint.a ?? constraint.left ?? constraint.top;
+      const bId = constraint.b ?? constraint.right ?? constraint.bottom;
+      if (!aId || !bId) continue;
+      const relation = directionalRelation(constraint.type, axis, aId, bId);
+      if (!relation) continue;
+      const [beforeId, afterId] = relation;
+      const insideBefore = itemWithin(ctx, container, beforeId);
+      const insideAfter = itemWithin(ctx, container, afterId);
+      if (!insideBefore && !insideAfter) continue;
+      if (insideBefore && insideBefore === insideAfter) continue;
+      const before = locate(beforeId);
+      const after = locate(afterId);
+      if (!before || !after) continue;
+      // before.max + gap <= after.min, with each rect riding on its item.
+      const beforeOffset = maxOf(before.rect, axis) - before.center;
+      const afterOffset = minOf(after.rect, axis) - after.center;
+      constraints.push(
+        new VpscConstraint(
+          variables[before.item],
+          variables[after.item],
+          beforeOffset - afterOffset + directionalGap,
+        ),
+      );
+    }
+    for (const nodes of ctx.alignments[axis]) {
+      if (!nodes.some((node) => itemWithin(ctx, container, node.id))) {
+        continue;
+      }
+      let first: { item: number; offset: number } | null = null;
+      for (const node of nodes) {
+        const found = locate(node.id);
+        if (!found) continue;
+        const item = found.item;
+        const offset = node[axis] - found.center;
+        if (!first) first = { item, offset };
+        else if (item !== first.item) {
+          constraints.push(
+            new VpscConstraint(
+              variables[first.item],
+              variables[item],
+              first.offset - offset,
+              true,
+            ),
+          );
+        }
+      }
+    }
+    const solver = new Solver(variables, constraints);
+    solver.setStartingPositions(centers);
+    solver.solve();
+    items.forEach((item, i) => {
+      const delta = variables[i].position() - centers[i];
+      if (Math.abs(delta) > EPSILON) {
+        translateEntityRaw(
+          ctx,
+          item.id,
+          axis === "x" ? delta : 0,
+          axis === "y" ? delta : 0,
+        );
+      }
+    });
+  }
+}
+
+function layoutArea(ctx: LayoutContext): number {
+  const bounds = boundsOfRects([
+    ...ctx.nodes.map((node) => nodeRect(node)),
+    ...allGroupRects(ctx).values(),
+  ]);
+  return bounds ? (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY) : 0;
+}
+
+function centerEdgeLength(ctx: LayoutContext): number {
+  return ctx.edgeEnds.reduce(
+    (total, [source, target]) =>
+      total +
+      Math.hypot(
+        ctx.nodes[source].x - ctx.nodes[target].x,
+        ctx.nodes[source].y - ctx.nodes[target].y,
+      ),
+    0,
+  );
+}
+
+// Alternating x/y compaction; each round is kept only if the layout stays
+// valid and area plus edge length (relative to the start) goes down.
+function compactLayout(ctx: LayoutContext) {
+  const area0 = Math.max(1, layoutArea(ctx));
+  const length0 = Math.max(1, centerEdgeLength(ctx));
+  const cost = () => layoutArea(ctx) / area0 + centerEdgeLength(ctx) / length0;
+  let best = cost();
+  for (let round = 0; round < 6; round++) {
+    const before = ctx.nodes.map((node) => ({ x: node.x, y: node.y }));
+    compactAxis(ctx, "x");
+    compactAxis(ctx, "y");
+    const candidate = cost();
+    if (
+      collectViolations(ctx, false, true).messages.length > 0 ||
+      candidate >= best - 1e-4
+    ) {
+      ctx.nodes.forEach((node, i) => Object.assign(node, before[i]));
+      break;
+    }
+    best = candidate;
+  }
+}
+
+const MAX_PLACEMENT_CHECKS = 300;
+
+// Layout area as a function of one node's position, with everything else
+// fixed: only the boundaries containing that node change with it.
+function incrementalArea(
+  ctx: LayoutContext,
+  index: number,
+): (x: number, y: number) => number {
+  const node = ctx.nodes[index];
+  const empty = () => ({
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  });
+  const grow = (into: LayoutRect, r: LayoutRect) => {
+    into.minX = Math.min(into.minX, r.minX);
+    into.minY = Math.min(into.minY, r.minY);
+    into.maxX = Math.max(into.maxX, r.maxX);
+    into.maxY = Math.max(into.maxY, r.maxY);
+  };
+  const fixed = empty();
+  for (const [i, other] of ctx.nodes.entries()) {
+    if (i !== index) grow(fixed, nodeRect(other));
+  }
+  // Per containing boundary: its padding and the bounds of its other members.
+  const own: Array<{ rest: LayoutRect; pad: number; band: number }> = [];
+  for (const boundary of ctx.boundaries) {
+    const members = ctx.memberSets.get(boundary.id);
+    if (!members || members.size === 0) continue;
+    const visible = boundary.draw !== false;
+    const pad = visible
+      ? ctx.options.boundaryPad +
+        ctx.options.nestPad * (ctx.maxDepth - boundaryDepth(ctx, boundary.id))
+      : 0;
+    const band = visible ? ctx.options.labelBand : 0;
+    const rest = empty();
+    for (const i of members) {
+      if (i !== index) grow(rest, nodeRect(ctx.nodes[i]));
+    }
+    if (!members.has(index)) {
+      if (Number.isFinite(rest.minX)) {
+        grow(fixed, {
+          minX: rest.minX - pad,
+          maxX: rest.maxX + pad,
+          minY: rest.minY - pad - band,
+          maxY: rest.maxY + pad,
+        });
+      }
+      continue;
+    }
+    own.push({ rest, pad, band });
+  }
+  return (x, y) => {
+    const box = {
+      minX: x - node.width / 2,
+      maxX: x + node.width / 2,
+      minY: y - node.height / 2,
+      maxY: y + node.height / 2,
+    };
+    const total = { ...fixed };
+    grow(total, box);
+    for (const { rest, pad, band } of own) {
+      const r = { ...rest };
+      grow(r, box);
+      grow(total, {
+        minX: r.minX - pad,
+        maxX: r.maxX + pad,
+        minY: r.minY - pad - band,
+        maxY: r.maxY + pad,
+      });
+    }
+    return (total.maxX - total.minX) * (total.maxY - total.minY);
+  };
+}
+
+// Nodes without edges (typically attackers) only need to satisfy their
+// placement rules, so they can sit in any free spot. Each one is moved to the
+// valid spot that leaves the layout smallest, preferring spots away from
+// straight edge lines (fewer detours for the router) and close to where it was.
+function edgelessNodes(ctx: LayoutContext): LayoutNode[] {
+  const connected = new Set(ctx.edgeEnds.flat());
+  const aligned = new Set([...ctx.alignments.x, ...ctx.alignments.y].flat());
+  return ctx.nodes.filter(
+    (node, index) => !connected.has(index) && !aligned.has(node),
+  );
+}
+
+function placeEdgelessNodes(ctx: LayoutContext) {
+  const movable = new Set(edgelessNodes(ctx));
+  const gap = ctx.options.nodeGap;
+  for (const [index, node] of ctx.nodes.entries()) {
+    if (!movable.has(node)) continue;
+    const origin = { x: node.x, y: node.y };
+    const present = (other: LayoutNode) => other !== node;
+    const others = [
+      ...ctx.nodes.filter(present).map((n) => nodeRect(n)),
+      ...allGroupRects(ctx).values(),
+    ];
+    // Snug spots beside every other node or boundary, at each gap a rule can
+    // require (node clearance, boundary clearance, direction rules).
+    const gaps = [gap / 2, gap, Math.max(ctx.options.minGap, gap)];
+    const xs = new Set<number>();
+    const ys = new Set<number>();
+    for (const r of others) {
+      for (const g of gaps) {
+        xs.add(Math.round(r.minX - g - node.width / 2));
+        xs.add(Math.round(r.maxX + g + node.width / 2));
+        ys.add(Math.round(r.minY - g - node.height / 2));
+        ys.add(Math.round(r.maxY + g + node.height / 2));
+      }
+      xs.add(Math.round(r.minX + node.width / 2));
+      xs.add(Math.round(r.maxX - node.width / 2));
+      xs.add(Math.round((r.minX + r.maxX) / 2));
+      ys.add(Math.round(r.minY + node.height / 2));
+      ys.add(Math.round(r.maxY - node.height / 2));
+      ys.add(Math.round((r.minY + r.maxY) / 2));
+    }
+    const padded = ctx.nodes
+      .filter(present)
+      .map((other) => nodeRect(other, gap / 2));
+    // Boundaries the node isn't in must stay clear of it.
+    const foreign = ctx.boundaries.flatMap((boundary) => {
+      if (ctx.memberSets.get(boundary.id)?.has(index)) return [];
+      const rect = rectFromMembers(ctx, boundary.id);
+      return rect ? [rect] : [];
+    });
+    const segments = ctx.edgeEnds.map(([a, b]) => ({
+      x1: ctx.nodes[a].x,
+      y1: ctx.nodes[a].y,
+      x2: ctx.nodes[b].x,
+      y2: ctx.nodes[b].y,
+    }));
+    const startArea = layoutArea(ctx);
+    const areaAt = incrementalArea(ctx, index);
+    // Spots sticking out of the current layout can only make it bigger.
+    const bounds = boundsOfRects([
+      ...ctx.nodes.map((other) => nodeRect(other)),
+      ...allGroupRects(ctx).values(),
+    ])!;
+    const inside = (value: number, half: number, min: number, max: number) =>
+      value - half >= min - EPSILON && value + half <= max + EPSILON;
+    const coarse = (values: Set<number>) => [
+      ...new Set([...values].map((value) => Math.round(value / 4) * 4)),
+    ];
+    const xsInside = coarse(xs).filter((x) =>
+      inside(x, node.width / 2, bounds.minX, bounds.maxX),
+    );
+    const ysInside = coarse(ys).filter((y) =>
+      inside(y, node.height / 2, bounds.minY, bounds.maxY),
+    );
+    // Cheap check of this node's own direction rules (fast, so it runs
+    // on every spot).
+    const directionalGap = Math.max(ctx.options.minGap, gap);
+    const ownRules = ctx.constraints.flatMap((constraint) => {
+      const aId = constraint.a ?? constraint.left ?? constraint.top;
+      const bId = constraint.b ?? constraint.right ?? constraint.bottom;
+      if (!aId || !bId || constraint.type === "near") return [];
+      if (constraint.type === "align") return [];
+      const involves = (id: string) =>
+        id === node.id || (ctx.memberSets.get(id)?.has(index) ?? false);
+      return involves(aId) || involves(bId)
+        ? [{ type: constraint.type, aId, bId }]
+        : [];
+    });
+    const rulesHold = () =>
+      ownRules.every(({ type, aId, bId }) => {
+        const a = entityRect(ctx, aId);
+        const b = entityRect(ctx, bId);
+        if (!a || !b) return true;
+        const fix = directionalCorrection(type, a, b, directionalGap);
+        return Math.abs(fix.dx) <= EPSILON && Math.abs(fix.dy) <= EPSILON;
+      });
+    const candidates: Array<{ x: number; y: number; rank: number[] }> = [];
+    for (const x of xsInside) {
+      for (const y of ysInside) {
+        node.x = x;
+        node.y = y;
+        const box = nodeRect(node, gap / 2);
+        if (padded.some((other) => rectanglesOverlap(box, other))) continue;
+        if (foreign.some((other) => rectanglesOverlap(box, other))) continue;
+        const area = areaAt(x, y);
+        if (area > startArea * (1 + 1e-6)) continue;
+        if (!rulesHold()) continue;
+        const blocked = segments.filter((segment) =>
+          segmentIntersectsRect(segment, nodeRect(node, NODE_EDGE_CLEARANCE)),
+        ).length;
+        candidates.push({
+          x,
+          y,
+          rank: [
+            Math.round(area / 100),
+            blocked,
+            Math.hypot(x - origin.x, y - origin.y),
+          ],
+        });
+      }
+    }
+    candidates.sort((a, b) => {
+      for (let i = 0; i < a.rank.length; i++) {
+        if (a.rank[i] !== b.rank[i]) return a.rank[i] - b.rank[i];
+      }
+      return 0;
+    });
+    let placed = false;
+    let fullChecks = 0;
+    for (const candidate of candidates) {
+      node.x = candidate.x;
+      node.y = candidate.y;
+      if (++fullChecks > MAX_PLACEMENT_CHECKS) break;
+      if (collectViolations(ctx, false, true).messages.length === 0) {
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) Object.assign(node, origin);
+  }
+}
+
+function repairPass(ctx: LayoutContext) {
+  resolveAlignmentConstraints(ctx);
+  resolveDirectionalConstraints(ctx);
+  resolveNodeOverlaps(ctx);
+  resolveBoundaryOverlaps(ctx);
+  if (routesEdges(ctx)) {
+    resolveDirectionalConstraints(ctx);
+    return;
+  }
+  resolveNodeEdgeIntersections(ctx);
+  resolveEdgeBoundaryIntersections(ctx);
+  resolveEdgeCrossings(ctx);
+  resolveLabelCollisions(ctx);
+  resolveDirectionalConstraints(ctx);
+}
+
+// Smallest spare distance of a directional constraint beyond its required
+// gap, over the axes it constrains. Zero means it is pressing against its
+// limit; null when it isn't a directional rule or an id is unknown.
+export function directionalSlack(
+  nodes: LayoutNode[],
+  boundaries: LayoutBoundary[],
+  constraint: LayoutConstraint,
+  options: LayoutOptions,
+): number | null {
+  const aId = constraint.a ?? constraint.left ?? constraint.top;
+  const bId = constraint.b ?? constraint.right ?? constraint.bottom;
+  if (!aId || !bId) return null;
+  const ctx = makeContext(nodes, boundaries, [], [], options);
+  const gap = Math.max(options.minGap, options.nodeGap);
+  let slack: number | null = null;
+  for (const axis of ["x", "y"] as const) {
+    const relation = directionalRelation(constraint.type, axis, aId, bId);
+    if (!relation) continue;
+    const before = entityRect(ctx, relation[0]);
+    const after = entityRect(ctx, relation[1]);
+    if (!before || !after) return null;
+    const spare =
+      axis === "x"
+        ? after.minX - before.maxX - gap
+        : after.minY - before.maxY - gap;
+    slack = slack === null ? spare : Math.min(slack, spare);
+  }
+  return slack;
+}
+
+// Moves an entity (node or boundary) by dx/dy together with everything the
+// directional rules require to stay before/after it on that axis, e.g. moving
+// a node up also moves the nodes that must stay above it.
+export function shiftWithDependents(
+  nodes: LayoutNode[],
+  boundaries: LayoutBoundary[],
+  constraints: LayoutConstraint[],
+  options: LayoutOptions,
+  id: string,
+  dx: number,
+  dy: number,
+): void {
+  const ctx = makeContext(nodes, boundaries, [], constraints, options);
+  if (dx !== 0) {
+    translateEntities(ctx, directionalClosure(ctx, id, dx, 0), dx, 0);
+  }
+  if (dy !== 0) {
+    translateEntities(ctx, directionalClosure(ctx, id, 0, dy), 0, dy);
+  }
+}
+
+// Moves nodes without edges (e.g. attackers) into free spots that shrink the
+// layout, then compacts again. Run once on the final layout of a routed engine
+// (it is too slow to repeat for every candidate). Positions are only changed
+// when the result is valid and smaller.
+export function placeEdgelessAndCompact(
+  nodes: LayoutNode[],
+  boundaries: LayoutBoundary[],
+  edges: LayoutEdge[],
+  constraints: LayoutConstraint[],
+  options: LayoutOptions,
+): Map<string, LayoutRect> | null {
+  const ctx = makeContext(nodes, boundaries, edges, constraints, options);
+  if (edgelessNodes(ctx).length === 0) return null;
+  const before = nodes.map((node) => ({ x: node.x, y: node.y }));
+  const area = layoutArea(ctx);
+  placeEdgelessNodes(ctx);
+  compactLayout(ctx);
+  if (
+    collectViolations(ctx, false, true).messages.length > 0 ||
+    layoutArea(ctx) >= area * (1 - 1e-6)
+  ) {
+    nodes.forEach((node, i) => Object.assign(node, before[i]));
+    return null;
+  }
+  return allGroupRects(ctx);
+}
+
 export function solveLayout(
   nodes: LayoutNode[],
   boundaries: LayoutBoundary[],
@@ -1444,17 +2153,30 @@ export function solveLayout(
   let stable = 0;
   let iteration = 0;
   const stableTarget = Math.max(1, options.stableIterations ?? 3);
+  // When the repair loop stops improving, restart from another grid variant.
+  const maxSeedVariants = options.preserveInitialPositions ? 1 : 4;
+  const stallLimit = Math.max(50, Math.floor(options.iterations / 10));
+  let seedVariant = 0;
+  let bestScore = Infinity;
+  let lastImprovement = 0;
   for (iteration = 1; iteration <= options.iterations; iteration++) {
-    resolveAlignmentConstraints(ctx);
-    resolveDirectionalConstraints(ctx);
-    resolveNodeOverlaps(ctx);
-    resolveBoundaryOverlaps(ctx);
-    resolveNodeEdgeIntersections(ctx);
-    resolveEdgeBoundaryIntersections(ctx);
-    resolveEdgeCrossings(ctx);
-    resolveDirectionalConstraints(ctx);
+    repairPass(ctx);
     check = collectViolations(ctx);
     stable = check.messages.length === 0 ? stable + 1 : 0;
+    const score = violationScore(check.messages);
+    if (score < bestScore) {
+      bestScore = score;
+      lastImprovement = iteration;
+    } else if (
+      check.messages.length > 0 &&
+      iteration - lastImprovement >= stallLimit &&
+      seedVariant + 1 < maxSeedVariants
+    ) {
+      seedVariant++;
+      initializeGrid(ctx, seedVariant);
+      bestScore = Infinity;
+      lastImprovement = iteration;
+    }
     if (every > 0 && iteration % every === 0) {
       snapshots.push(
         captureSnapshot(ctx, iteration, check.messages.length, []),
@@ -1479,7 +2201,33 @@ export function solveLayout(
       ),
     );
   }
-  if (check.messages.length === 0) {
+  if (check.messages.length === 0 && options.fastCompaction) {
+    const start = ctx.nodes.map((node) => ({ x: node.x, y: node.y }));
+    const attempts: Array<Array<{ x: number; y: number }>> = [];
+    const keep = () => {
+      if (collectViolations(ctx, false, true).messages.length === 0) {
+        attempts.push(ctx.nodes.map((node) => ({ x: node.x, y: node.y })));
+      }
+    };
+    compactLayout(ctx);
+    keep();
+
+    const areaOf = (positions: Array<{ x: number; y: number }>) => {
+      ctx.nodes.forEach((node, i) => Object.assign(node, positions[i]));
+      return layoutArea(ctx);
+    };
+    let best = start;
+    let bestArea = areaOf(start);
+    for (const positions of attempts) {
+      const area = areaOf(positions);
+      if (area < bestArea * (1 - 1e-6)) {
+        best = positions;
+        bestArea = area;
+      }
+    }
+    ctx.nodes.forEach((node, i) => Object.assign(node, best[i]));
+    check = collectViolations(ctx);
+  } else if (check.messages.length === 0) {
     const minimizeIterations = Math.max(
       0,
       Math.floor(options.minimizeIterations ?? 100),
@@ -1596,8 +2344,17 @@ export function solveLayout(
           }
         : {}),
       obstacles: () => minimizationObstacles(ctx),
+      repair: (maxPasses) => {
+        for (let pass = 0; pass < maxPasses; pass++) {
+          repairPass(ctx);
+          if (collectViolations(ctx, true, true).messages.length === 0) {
+            return true;
+          }
+        }
+        return false;
+      },
       isValid: (includeLabels) =>
-        collectViolations(ctx, includeLabels).messages.length === 0,
+        collectViolations(ctx, includeLabels, true).messages.length === 0,
       measure: () => measureLayout(ctx),
     });
     check = collectViolations(ctx);

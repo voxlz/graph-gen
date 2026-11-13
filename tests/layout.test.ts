@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCanvas } from "canvas";
 import {
+  directionalSlack,
   solveLayout,
   type LayoutEdge,
   type LayoutNode,
@@ -901,5 +902,38 @@ constraints {
     );
 
     expect(result.violations).toEqual([]);
+  });
+});
+
+describe("directionalSlack", () => {
+  const node = (id: string, x: number, y: number) => ({
+    id,
+    x,
+    y,
+    width: 100,
+    height: 50,
+    boundaryParent: null,
+  });
+  const slackOptions = {
+    minGap: 20,
+    nodeGap: 20,
+    boundaryPad: 0,
+    labelBand: 0,
+    nestPad: 0,
+    iterations: 1,
+  };
+
+  it("is zero for a rule pressing against its gap and positive otherwise", () => {
+    const tight = [node("a", 0, 0), node("b", 0, 70)];
+    const loose = [node("a", 0, 0), node("b", 0, 170)];
+    const rule = { type: "top", a: "a", b: "b" };
+    expect(directionalSlack(tight, [], rule, slackOptions)).toBeCloseTo(0);
+    expect(directionalSlack(loose, [], rule, slackOptions)).toBeCloseTo(100);
+  });
+
+  it("uses the tighter axis of a diagonal rule", () => {
+    const nodes = [node("a", 0, 0), node("b", 200, 70)];
+    const rule = { type: "topleft", a: "a", b: "b" };
+    expect(directionalSlack(nodes, [], rule, slackOptions)).toBeCloseTo(0);
   });
 });

@@ -58,6 +58,9 @@ export interface MinimizeOptions {
   elementAreaScore?: () => number;
   obstacles: () => MinimizeObstacle[];
   isValid: (includeLabels: boolean) => boolean;
+  // Runs up to maxPasses solver repair passes; returns whether the layout is
+  // valid afterwards.
+  repair?: (maxPasses: number) => boolean;
   measure: () => MinimizeMeasure | null;
   onIteration?: (frame: StrategyFrame) => void;
 }

@@ -1,6 +1,7 @@
 // render-all.ts
 // Renders every example graph into renders/, mirroring the source folder:
-//   graph.ggn                 -> renders/graph.png, ..._cola.png, ..._force.png
+//   graph.ggn                 -> renders/graph.png (default curved engine) plus
+//                                _orthogonal, _constraint, _cola and _force variants
 //   demo/showcase/overlap.ggn -> renders/demo/showcase/overlap.png and variants
 //   scopes/asrv_scope.ggn     -> renders/scopes/asrv_scope.png and variants
 //   example/parsedGraph...json-> renders/example/parsedGraphExample.png and variants
@@ -116,7 +117,9 @@ for (const input of inputs) {
     continue;
   }
   for (const [layout, suffix] of [
-    ["constraint", ""],
+    ["curved", ""],
+    ["orthogonal", "_orthogonal"],
+    ["constraint", "_constraint"],
     ["cola", "_cola"],
     ["force", "_force"],
   ] as const) {

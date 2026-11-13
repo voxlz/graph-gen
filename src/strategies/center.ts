@@ -37,6 +37,9 @@ function hasNodeClearanceViolation(options: MinimizeOptions): boolean {
   return false;
 }
 
+// Moves shorter than this don't visibly change the layout.
+const MIN_STEP = 1;
+
 function tryMinimizeAxis(
   options: MinimizeOptions,
   node: LayoutNode,
@@ -47,10 +50,19 @@ function tryMinimizeAxis(
   const delta = center - original;
   if (Math.abs(delta) <= EPSILON) return false;
   const originalPositions = snapshot(options.nodes);
-  for (const fraction of [
+  const fractions = [
     1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,
     0.001953125,
-  ]) {
+  ].filter((fraction) => Math.abs(delta * fraction) >= MIN_STEP);
+  if (fractions.length === 0) return false;
+  // Most nodes are blocked outright; test the smallest step first so those
+  // cost one validity check instead of one per fraction.
+  const smallest = fractions[fractions.length - 1];
+  setNodeAxis(options, node, axis, original + delta * smallest);
+  const canMove = !hasNodeClearanceViolation(options) && options.isValid(true);
+  restore(options.nodes, originalPositions);
+  if (!canMove) return false;
+  for (const fraction of fractions) {
     restore(options.nodes, originalPositions);
     setNodeAxis(options, node, axis, original + delta * fraction);
     if (!hasNodeClearanceViolation(options) && options.isValid(true)) {

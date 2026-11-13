@@ -241,7 +241,7 @@ export function minimizeBlockerEscapes(
             .map((entity) => entity.id),
           onIteration: undefined,
         },
-        Math.min(10, options.generations),
+        Math.min(3, options.generations),
       );
       const candidateMeasure = options.measure();
       if (!candidateMeasure) continue;

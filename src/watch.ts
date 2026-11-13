@@ -97,6 +97,11 @@ function renderGraph(file: string, outputDirectory?: string): Promise<void> {
     if (output) args.push(output);
     const child = spawn("tsx", args, {
       cwd: rootDir,
+      // Hint about constraints that block a smaller layout while editing.
+      env: {
+        ...process.env,
+        GRAPHGEN_CONSTRAINT_HINTS: process.env.GRAPHGEN_CONSTRAINT_HINTS ?? "1",
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
