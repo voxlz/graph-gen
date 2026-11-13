@@ -12,6 +12,9 @@ export interface LayoutNode {
   width: number;
   height: number;
   boundaryParent: string | null;
+  // Clearance this node needs from other nodes and foreign boundaries
+  // (default nodeGap). A pair of nodes keeps the smaller of their two gaps.
+  gap?: number;
 }
 
 export interface LayoutBoundary {
@@ -285,6 +288,20 @@ function rectCenter(rect: LayoutRect) {
     x: (rect.minX + rect.maxX) / 2,
     y: (rect.minY + rect.maxY) / 2,
   };
+}
+
+function gapOf(ctx: LayoutContext, node: LayoutNode): number {
+  return node.gap ?? ctx.options.nodeGap;
+}
+
+// Whether two nodes are closer than the gap the pair needs.
+function nodesTooClose(
+  ctx: LayoutContext,
+  a: LayoutNode,
+  b: LayoutNode,
+): boolean {
+  const gap = Math.min(gapOf(ctx, a), gapOf(ctx, b));
+  return rectanglesOverlap(nodeRect(a, gap / 2), nodeRect(b, gap / 2));
 }
 
 function expandRect(rect: LayoutRect, padding: number): LayoutRect {
@@ -698,9 +715,11 @@ function resolveNodeOverlaps(ctx: LayoutContext) {
   for (const nodes of ctx.alignments.x) packAlignment(nodes, "y");
   for (const nodes of ctx.alignments.y) packAlignment(nodes, "x");
 
-  const padding = ctx.options.nodeGap / 2;
   for (let first = 0; first < ctx.nodes.length; first++) {
     for (let second = first + 1; second < ctx.nodes.length; second++) {
+      const padding =
+        Math.min(gapOf(ctx, ctx.nodes[first]), gapOf(ctx, ctx.nodes[second])) /
+        2;
       const a = expandRect(nodeRect(ctx.nodes[first]), padding);
       const b = expandRect(nodeRect(ctx.nodes[second]), padding);
       if (!rectanglesOverlap(a, b)) continue;
@@ -760,7 +779,7 @@ function resolveBoundaryOverlaps(ctx: LayoutContext) {
     if (!boundaryRect) continue;
     for (let index = 0; index < ctx.nodes.length; index++) {
       if (belongsTo(ctx, index, boundary.id)) continue;
-      const rect = nodeRect(ctx.nodes[index], ctx.options.nodeGap / 2);
+      const rect = nodeRect(ctx.nodes[index], gapOf(ctx, ctx.nodes[index]) / 2);
       if (!rectanglesOverlap(boundaryRect, rect)) continue;
       const entity = movableNodeEntity(
         ctx,
@@ -794,7 +813,7 @@ function resolveBoundaryOverlaps(ctx: LayoutContext) {
         () =>
           !rectanglesOverlap(
             boundaryRect,
-            nodeRect(ctx.nodes[index], ctx.options.nodeGap / 2),
+            nodeRect(ctx.nodes[index], gapOf(ctx, ctx.nodes[index]) / 2),
           ),
       );
       rects = allGroupRects(ctx);
@@ -1249,11 +1268,12 @@ function collectViolations(
     }
   }
 
-  const padding = ctx.options.nodeGap / 2;
-  const paddedNodes = ctx.nodes.map((node) => nodeRect(node, padding));
+  const paddedNodes = ctx.nodes.map((node) =>
+    nodeRect(node, gapOf(ctx, node) / 2),
+  );
   for (let first = 0; first < ctx.nodes.length; first++) {
     for (let second = first + 1; second < ctx.nodes.length; second++) {
-      if (rectanglesOverlap(paddedNodes[first], paddedNodes[second])) {
+      if (nodesTooClose(ctx, ctx.nodes[first], ctx.nodes[second])) {
         add(`node clearance ${ctx.nodes[first].id} / ${ctx.nodes[second].id}`);
         if (done()) return result();
       }
@@ -1614,14 +1634,15 @@ function compactAxis(ctx: LayoutContext, axis: "x" | "y") {
     ];
     const items = ids.flatMap((id) => {
       const rect = entityRect(ctx, id);
-      const isNode = ctx.nodeById.has(id);
+      const node = ctx.nodeById.get(id);
       return rect
         ? [
             {
               id,
               rect,
-              isNode,
-              padding: isNode ? 0 : boundaryPadding(ctx, id),
+              isNode: Boolean(node),
+              gap: node ? gapOf(ctx, node) : ctx.options.nodeGap,
+              padding: node ? 0 : boundaryPadding(ctx, id),
             },
           ]
         : [];
@@ -1685,15 +1706,14 @@ function compactAxis(ctx: LayoutContext, axis: "x" | "y") {
       for (let j = i + 1; j < items.length; j++) {
         const a = items[i];
         const b = items[j];
-        // Nodes need nodeGap between them; a boundary's padding counts towards
-        // that, but boundaries keep at least half a gap from their neighbours.
+        // Nodes need their gap between them; a boundary's padding counts
+        // towards that, but boundaries keep at least half a gap from their
+        // neighbours.
+        const gap = Math.min(a.gap, b.gap);
         const clearance =
           a.isNode && b.isNode
-            ? ctx.options.nodeGap
-            : Math.max(
-                ctx.options.nodeGap / 2,
-                ctx.options.nodeGap - a.padding - b.padding,
-              );
+            ? gap
+            : Math.max(gap / 2, gap - a.padding - b.padding);
         const perpGap = Math.max(
           minOf(a.rect, perp) - maxOf(b.rect, perp),
           minOf(b.rect, perp) - maxOf(a.rect, perp),

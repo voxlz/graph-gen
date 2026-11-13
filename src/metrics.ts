@@ -196,8 +196,10 @@ export function metricsFromDump(dump: any) {
       through++;
     }
   }
-  // Labels covering a node or another label, and labels crossed by an edge.
-  const labels: Rect[] = dump.labels ?? [];
+  // Labels covering a node or another label, and labels crossed by an edge
+  // other than their own (a label may sit on its own edge).
+  const labels: Array<Rect & { source?: string; target?: string }> =
+    dump.labels ?? [];
   const overlap = (a: Rect, b: Rect) =>
     a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
   const shrink = (r: Rect, d: number) => ({
@@ -216,7 +218,11 @@ export function metricsFromDump(dump: any) {
     ) {
       labelHits++;
     }
-    if (paths.some((path) => hitsRect(path.points, inner))) labelLines++;
+    const own = (path: { s: string; t: string }) =>
+      (path.s === label.source && path.t === label.target) ||
+      (path.s === label.target && path.t === label.source);
+    if (paths.some((path) => !own(path) && hitsRect(path.points, inner)))
+      labelLines++;
   });
   // Edges drawn on top of each other along a shared stretch (> 2px).
   let overlaps = 0;

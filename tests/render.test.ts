@@ -7,7 +7,25 @@ import {
   prepareEdges,
   renderErrorGraph,
   renderGraph,
+  wrapLabel,
 } from "../src/render";
+
+describe("wrapLabel", () => {
+  // One unit per character, so widths are easy to reason about.
+  const measure = (line: string) => line.length;
+
+  it("breaks lines at spaces so none exceeds the max width", () => {
+    expect(
+      wrapLabel("1. GET /a {b}\n2. Return {all the rows}", 12, measure),
+    ).toBe("1. GET /a\n{b}\n2. Return\n{all the\nrows}");
+  });
+
+  it("keeps a word wider than the max width whole", () => {
+    expect(wrapLabel("x averyveryverylongword y", 8, measure)).toBe(
+      "x\naveryveryverylongword\ny",
+    );
+  });
+});
 
 describe("renderGraph", () => {
   it("writes a PNG for an empty graph", async () => {

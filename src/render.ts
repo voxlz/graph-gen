@@ -12,7 +12,12 @@ import {
   type LayoutSnapshot,
 } from "./layout";
 import {
+  beyond,
+  bendToLabels,
+  footprintOf,
+  LABEL_NODE_CLEARANCE,
   placeRouteLabels,
+  routeTouchesLabel,
   obstacleHits,
   polylineCrossings,
   polylineLength,
@@ -151,6 +156,34 @@ export function formatEdgeLabel(
     const value = edge[key];
     return value == null ? placeholder : String(value);
   });
+}
+
+// Breaks each line of a label at spaces so no line is wider than maxWidth
+// (a single word wider than that stays whole). maxWidth <= 0 keeps the text.
+export function wrapLabel(
+  text: string,
+  maxWidth: number,
+  measure: (line: string) => number,
+): string {
+  if (!(maxWidth > 0)) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const lines: string[] = [];
+      let current = "";
+      for (const word of line.split(" ")) {
+        const next = current ? `${current} ${word}` : word;
+        if (current && measure(next) > maxWidth) {
+          lines.push(current);
+          current = word;
+        } else {
+          current = next;
+        }
+      }
+      lines.push(current);
+      return lines.join("\n");
+    })
+    .join("\n");
 }
 
 export function prepareEdges(edges: any[], labelFormat: string): any[] {
@@ -381,6 +414,9 @@ export async function renderGraph(
   spec: GraphSpec,
   outputPath: string,
   stylePath?: string,
+  // Edges (by index) whose labels are laid out as nodes; set by the "auto"
+  // re-render for labels that couldn't otherwise touch their edge.
+  labelNodeEdges: number[] = [],
 ): Promise<RenderResult> {
   // --- load + merge styles ----------------------------------------------------
   // style.jsonc / style.json = global defaults; spec.shapes = per-graph overrides.
@@ -441,6 +477,24 @@ export async function renderGraph(
       spec.graph?.lineColor ?? globalStyle.graph?.lineColor ?? "#000000",
     labelFormat:
       spec.graph?.labelFormat ?? globalStyle.graph?.labelFormat ?? "",
+    // edge label lines wider than this (px) are wrapped at spaces; 0 = never.
+    labelMaxWidth: Number(
+      spec.graph?.labelMaxWidth ?? globalStyle.graph?.labelMaxWidth ?? 220,
+    ),
+    // Curved layout only: lay out edge labels as nodes that push other nodes
+    // away, with each edge routed through its label. "auto" does so only for
+    // labels that can't touch their edge otherwise; true always, false never.
+    labelNodes: (() => {
+      const value = String(
+        process.env.GRAPHGEN_LABEL_NODES ??
+          spec.graph?.labelNodes ??
+          globalStyle.graph?.labelNodes ??
+          "auto",
+      ).toLowerCase();
+      if (value === "true" || value === "1") return "always";
+      if (value === "false" || value === "0") return "never";
+      return "auto";
+    })(),
     // clear gap between a boundary's nodes and its border.
     boundaryPad:
       spec.graph?.boundaryPad ?? globalStyle.graph?.boundaryPad ?? 34,
@@ -678,18 +732,19 @@ export async function renderGraph(
       console.warn(`[edge] skipping invalid edge: ${e.source} -> ${e.target}`);
       continue;
     }
+    const label = e.label
+      ? wrapLabel(e.label, graphMeta.labelMaxWidth, textWidth)
+      : e.label;
     links.push({
       source: s,
       target: t,
       _sourceId: nodes[s].id,
       _targetId: nodes[t].id,
-      label: e.label,
-      labelWidth: e.label
-        ? Math.max(
-            ...e.label.split("\n").map((line: string) => textWidth(line)),
-          )
+      label,
+      labelWidth: label
+        ? Math.max(...label.split("\n").map((line: string) => textWidth(line)))
         : 0,
-      labelHeight: e.label ? e.label.split("\n").length * 16 : 0,
+      labelHeight: label ? label.split("\n").length * 16 : 0,
       // support DSL booleans and the legacy `type` field ("rightArrow"/"leftArrow"/"line")
       arrowSource: e.arrowSource,
       arrowTarget: e.arrowTarget,
@@ -886,6 +941,86 @@ export async function renderGraph(
   const routeClearance = Math.max(4, Math.min(12, graphMeta.nodeGap / 3));
   let afterRender: (() => void) | null = null;
   const routedMode = edgeRouting === "orthogonal" ? "orthogonal" : "curved";
+  // Label nodes: a labelled edge can get a node the size of its label chip,
+  // linked to both endpoints, for the duration of each layout solve. It keeps
+  // LABEL_NODE_CLEARANCE from other nodes, so it pushes them (and its own
+  // endpoints) apart; its final centre is stored as the link's label position
+  // and the curve is routed through it.
+  const labelNodeSet = new Set<number>(
+    edgeRouting !== "curved" || graphMeta.labelNodes === "never"
+      ? []
+      : graphMeta.labelNodes === "always"
+        ? links.flatMap((link, i) => (link.label ? [i] : []))
+        : labelNodeEdges.filter((i) => links[i]?.label),
+  );
+  links.forEach((link, i) => (link.labelNode = labelNodeSet.has(i)));
+  const useLabelNodes = labelNodeSet.size > 0;
+  function withLabelNodes<T>(
+    run: (layoutNodes: any[], layoutEdges: any[]) => T,
+  ): T {
+    if (!useLabelNodes) return run(nodes, links);
+    const parentOf = new Map<string, string | null>(
+      boundaries.map((b: any) => [b.id, b.parent ?? null]),
+    );
+    const chain = (id: string | null) => {
+      const ids: Array<string | null> = [];
+      for (let at = id; at; at = parentOf.get(at) ?? null) ids.push(at);
+      return [...ids, null];
+    };
+    const labelNodes: any[] = [];
+    const layoutEdges: any[] = [];
+    links.forEach((link, i) => {
+      const s = resolveNode(link.source);
+      const t = resolveNode(link.target);
+      if (!link.labelNode) {
+        layoutEdges.push({ source: s, target: t });
+        return;
+      }
+      const targetChain = new Set(chain(t.boundaryParent));
+      const label = {
+        id: `\u0000label:${i}`,
+        x: (s.x + t.x) / 2,
+        y: (s.y + t.y) / 2,
+        width: link.labelWidth + 8,
+        height: link.labelHeight + 4,
+        boundaryParent:
+          chain(s.boundaryParent).find((id) => targetChain.has(id)) ?? null,
+        gap: LABEL_NODE_CLEARANCE,
+        link,
+      };
+      labelNodes.push(label);
+      layoutEdges.push(
+        { source: s, target: label },
+        { source: label, target: t },
+      );
+    });
+    // Label nodes come first so overlap repair moves the real nodes away
+    // from them rather than sliding the labels off their edges.
+    const result = run([...labelNodes, ...nodes], layoutEdges);
+    for (const label of labelNodes) {
+      label.link.labelX = label.x;
+      label.link.labelY = label.y;
+      label.link.labelAnchorX = label.x;
+      label.link.labelAnchorY = label.y;
+    }
+    return result;
+  }
+  // Routing input for the current positions; with label nodes, labelled
+  // edges pass through their stored label position.
+  function routeEdgeFor(link: any) {
+    const endpoint = (ref: any) =>
+      idToIndex[(typeof ref === "number" ? nodes[ref] : ref).id];
+    return {
+      source: endpoint(link.source),
+      target: endpoint(link.target),
+      labelWidth: link.label ? link.labelWidth : 0,
+      labelHeight: link.label ? link.labelHeight : 0,
+      via:
+        link.labelNode && link.labelX != null
+          ? { x: link.labelX, y: link.labelY }
+          : undefined,
+    };
+  }
   const snapOptions = {
     minGap: graphMeta.minGap,
     nodeGap: graphMeta.nodeGap,
@@ -917,8 +1052,10 @@ export async function renderGraph(
     positions: Array<{ x: number; y: number }>,
     groupRects: Map<string, any> | null,
     reference?: { area: number; length: number; longest: number },
+    labels?: LayoutCandidate["labels"],
   ) {
     nodes.forEach((n, i) => Object.assign(n, positions[i]));
+    if (labels) links.forEach((link, i) => Object.assign(link, labels[i]));
     const members = memberSetsById();
     const rects = new Map<string, any>();
     boundaries.forEach((b: any) => {
@@ -957,6 +1094,15 @@ export async function renderGraph(
       minY = Math.min(minY, n.y - n.height / 2);
       maxY = Math.max(maxY, n.y + n.height / 2);
     }
+    if (useLabelNodes && groupRects !== null) {
+      for (const l of links) {
+        if (!l.labelNode || l.labelX == null) continue;
+        minX = Math.min(minX, l.labelX - l.labelWidth / 2 - 4);
+        maxX = Math.max(maxX, l.labelX + l.labelWidth / 2 + 4);
+        minY = Math.min(minY, l.labelY - l.labelHeight / 2 - 2);
+        maxY = Math.max(maxY, l.labelY + l.labelHeight / 2 + 2);
+      }
+    }
     boundaries.forEach((b: any) => {
       const r = rects.get(b.id);
       if (!r || b.draw === false) return;
@@ -965,15 +1111,13 @@ export async function renderGraph(
       minY = Math.min(minY, r.minY);
       maxY = Math.max(maxY, r.maxY);
     });
-    const area = (maxX - minX) * (maxY - minY);
-    const endpoint = (ref: any) =>
-      idToIndex[(typeof ref === "number" ? nodes[ref] : ref).id];
     const routeInput = {
       nodes,
-      edges: links.map((l) => ({
-        source: endpoint(l.source),
-        target: endpoint(l.target),
-      })),
+      edges: links.map((l) =>
+        groupRects === null
+          ? { ...routeEdgeFor(l), via: undefined }
+          : routeEdgeFor(l),
+      ),
       groups: boundaries.flatMap((b: any) =>
         b.draw === false || !rects.get(b.id)
           ? []
@@ -990,6 +1134,18 @@ export async function renderGraph(
             ],
           }))
         : routeEdges(routeInput, edgeRouting);
+    // Curves bulging out of the nodes' footprint enlarge the drawing too.
+    if (groupRects !== null) {
+      for (const route of routes) {
+        for (const p of route.points) {
+          minX = Math.min(minX, p.x);
+          maxX = Math.max(maxX, p.x);
+          minY = Math.min(minY, p.y);
+          maxY = Math.max(maxY, p.y);
+        }
+      }
+    }
+    const area = (maxX - minX) * (maxY - minY);
     const lengths = routes.map((route) => polylineLength(route.points));
     const length = lengths.reduce((sum, value) => sum + value, 0);
     const longest = Math.max(0, ...lengths);
@@ -1052,6 +1208,7 @@ export async function renderGraph(
       current.positions,
       current.result.groups,
       reference,
+      current.labels,
     );
     for (let round = 0; round < SNAP_ROUNDS[routedMode]; round++) {
       // The longest edges relative to their straight centre distance (detours)
@@ -1093,6 +1250,7 @@ export async function renderGraph(
               candidate.positions,
               solved.groups,
               reference,
+              candidate.labels,
             );
             if (
               candidateScore.value <
@@ -1113,6 +1271,7 @@ export async function renderGraph(
           untangled.positions,
           untangled.result.groups,
           reference,
+          untangled.labels,
         );
         if (
           untangledScore.value <
@@ -1142,6 +1301,7 @@ export async function renderGraph(
       current.positions,
       current.result.groups,
       reference,
+      current.labels,
     );
     const problems = (sc: typeof score) => sc.crossings + sc.hitEdges.length;
     for (
@@ -1172,6 +1332,7 @@ export async function renderGraph(
               candidate.positions,
               solved.groups,
               reference,
+              candidate.labels,
             );
             const bar = improved?.score.value ?? score.value;
             if (
@@ -1201,7 +1362,12 @@ export async function renderGraph(
     options: Parameters<typeof solveLayout>[4],
   ): void {
     const all: any[] = spec.constraints || [];
-    const final = routedScore(best.positions, best.result.groups, reference);
+    const final = routedScore(
+      best.positions,
+      best.result.groups,
+      reference,
+      best.labels,
+    );
     const hints: Array<{ rule: any; area: number; length: number }> = [];
     // Only rules on an endpoint of one of the longest edges (or a boundary
     // holding one) can be what keeps that edge from getting shorter.
@@ -1233,7 +1399,9 @@ export async function renderGraph(
       if (slack === null || slack > CONSTRAINT_HINT_SLACK) continue;
       const others = all.filter((other) => other !== rule);
       const repair = () =>
-        solveLayout(nodes, boundaries, links, others, options);
+        withLabelNodes((layoutNodes, layoutEdges) =>
+          solveLayout(layoutNodes, boundaries, layoutEdges, others, options),
+        );
       const solved = repair();
       if (!solved.valid) continue;
       const relaxed = snapLongEdges(
@@ -1246,6 +1414,7 @@ export async function renderGraph(
         relaxed.positions,
         relaxed.result.groups,
         reference,
+        relaxed.labels,
       );
       if (score.crossings + score.hitEdges.length > 0) continue;
       const area = 1 - score.area / final.area;
@@ -1282,20 +1451,32 @@ export async function renderGraph(
     repair: () => ReturnType<typeof solveLayout>,
   ): LayoutCandidate {
     restoreCandidate(nodes, links, start);
-    const groups = placeEdgelessAndCompact(
-      nodes,
-      boundaries,
-      links,
-      spec.constraints || [],
-      options,
+    const groups = withLabelNodes((layoutNodes, layoutEdges) =>
+      placeEdgelessAndCompact(
+        layoutNodes,
+        boundaries,
+        layoutEdges,
+        spec.constraints || [],
+        options,
+      ),
     );
     if (!groups) return start;
     let candidate = captureCandidate(nodes, links, {
       ...start.result,
       groups,
     });
-    const before = routedScore(start.positions, start.result.groups, reference);
-    let after = routedScore(candidate.positions, groups, reference);
+    const before = routedScore(
+      start.positions,
+      start.result.groups,
+      reference,
+      start.labels,
+    );
+    let after = routedScore(
+      candidate.positions,
+      groups,
+      reference,
+      candidate.labels,
+    );
     // Compacting into the freed space can make edges cross; try to untangle
     // those before giving up on the smaller layout.
     if (after.crossings + after.hitEdges.length > 0) {
@@ -1304,6 +1485,7 @@ export async function renderGraph(
         candidate.positions,
         candidate.result.groups,
         reference,
+        candidate.labels,
       );
     }
     const kept =
@@ -1426,12 +1608,14 @@ export async function renderGraph(
       } else if (seed === "warm" && warmStart) {
         nodes.forEach((n, i) => Object.assign(n, warmStart[i]));
       }
-      const solved = solveLayout(
-        nodes,
-        boundaries,
-        links,
-        spec.constraints || [],
-        solveOptions(seed !== "grid", variant.centerPull),
+      const solved = withLabelNodes((layoutNodes, layoutEdges) =>
+        solveLayout(
+          layoutNodes,
+          boundaries,
+          layoutEdges,
+          spec.constraints || [],
+          solveOptions(seed !== "grid", variant.centerPull),
+        ),
       );
       return captureCandidate(nodes, links, solved);
     };
@@ -1484,6 +1668,7 @@ export async function renderGraph(
             candidate.positions,
             candidate.result.groups,
             reference,
+            candidate.labels,
           );
           if (score.value < bestScore) {
             bestScore = score.value;
@@ -1491,12 +1676,14 @@ export async function renderGraph(
           }
         }
         const repair = () =>
-          solveLayout(
-            nodes,
-            boundaries,
-            links,
-            spec.constraints || [],
-            solveOptions(true),
+          withLabelNodes((layoutNodes, layoutEdges) =>
+            solveLayout(
+              layoutNodes,
+              boundaries,
+              layoutEdges,
+              spec.constraints || [],
+              solveOptions(true),
+            ),
           );
         best = snapLongEdges(best, reference, repair);
         best = untangle(best, reference, repair);
@@ -1626,12 +1813,7 @@ export async function renderGraph(
   if (edgeRouting !== "straight") {
     const routeInput = {
       nodes,
-      edges: links.map((link) => ({
-        source: idToIndex[resolveNode(link.source).id],
-        target: idToIndex[resolveNode(link.target).id],
-        labelWidth: link.label ? link.labelWidth : 0,
-        labelHeight: link.label ? link.labelHeight : 0,
-      })),
+      edges: links.map(routeEdgeFor),
       groups: groups.flatMap((g, gi) =>
         boundaries[gi].draw === false || !g._rect
           ? []
@@ -1641,8 +1823,48 @@ export async function renderGraph(
     };
     const routes = routeEdges(routeInput, edgeRouting);
     const spots = placeRouteLabels(routeInput, routes);
+    // Labels pushed off their edge pull the edge over to them instead.
+    const finalRoutes =
+      edgeRouting === "curved"
+        ? bendToLabels(routeInput, routes, spots)
+        : routes;
+    if (edgeRouting === "curved" && graphMeta.labelNodes === "auto") {
+      // Labels that overlap something, that their edge couldn't bend to reach
+      // or that stick out of the layout become label nodes and the graph is
+      // laid out again. Earlier label nodes are kept, so each round only adds
+      // offenders.
+      const footprint = footprintOf(routeInput);
+      const offenders = spots.flatMap((spot, i) =>
+        spot &&
+        !labelNodeSet.has(i) &&
+        (spot.blocked ||
+          beyond(
+            {
+              minX: spot.x - links[i].labelWidth / 2 - 4,
+              maxX: spot.x + links[i].labelWidth / 2 + 4,
+              minY: spot.y - links[i].labelHeight / 2 - 2,
+              maxY: spot.y + links[i].labelHeight / 2 + 2,
+            },
+            footprint,
+          ) > 1 ||
+          !routeTouchesLabel(
+            finalRoutes[i],
+            spot,
+            links[i].labelWidth,
+            links[i].labelHeight,
+          ))
+          ? [i]
+          : [],
+      );
+      if (offenders.length > 0) {
+        return renderGraph(spec, outputPath, stylePath, [
+          ...labelNodeSet,
+          ...offenders,
+        ]);
+      }
+    }
     links.forEach((link, i) => {
-      link.route = routes[i];
+      link.route = finalRoutes[i];
       const spot = spots[i];
       if (spot) {
         link.labelX = spot.x;
@@ -1674,6 +1896,21 @@ export async function renderGraph(
     maxX = Math.max(maxX, g._rect.maxX);
     minY = Math.min(minY, g._rect.minY);
     maxY = Math.max(maxY, g._rect.maxY);
+  }
+  // Routed edges and their labels can reach past the nodes and boundaries.
+  for (const link of links) {
+    for (const p of link.route?.points ?? []) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    if (link.label && link.labelX != null && link.labelY != null) {
+      minX = Math.min(minX, link.labelX - link.labelWidth / 2 - 4);
+      maxX = Math.max(maxX, link.labelX + link.labelWidth / 2 + 4);
+      minY = Math.min(minY, link.labelY - link.labelHeight / 2 - 2);
+      maxY = Math.max(maxY, link.labelY + link.labelHeight / 2 + 2);
+    }
   }
   if (!isFinite(minX)) {
     minX = 0;
@@ -1975,6 +2212,8 @@ export async function renderGraph(
       const horizontal = Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y);
       edgeLabels.push({
         text: link.label,
+        source: link._sourceId,
+        target: link._targetId,
         x: link.labelX == null ? ax : tx(link.labelX),
         // anchor: the true midpoint the label belongs to (before the offset)
         ax: link.labelAnchorX == null ? ax : tx(link.labelAnchorX),
@@ -2044,6 +2283,8 @@ export async function renderGraph(
 
   // -- edge labels (drawn last so they sit on top of nodes and edges) --
   const labelRects: Array<{
+    source: string;
+    target: string;
     minX: number;
     maxX: number;
     minY: number;
@@ -2059,6 +2300,8 @@ export async function renderGraph(
     const y = lbl.y ?? (lbl.offset ? lbl.ay + totalH / 2 + 8 : lbl.ay);
     const top = y - totalH / 2;
     labelRects.push({
+      source: lbl.source,
+      target: lbl.target,
       minX: lbl.x - maxW / 2 - 4,
       maxX: lbl.x + maxW / 2 + 4,
       minY: top - 2,
@@ -2106,6 +2349,8 @@ export async function renderGraph(
         })),
       })),
       labels: labelRects.map((r) => ({
+        source: r.source,
+        target: r.target,
         minX: r.minX - offsetX,
         maxX: r.maxX - offsetX,
         minY: r.minY - offsetY,

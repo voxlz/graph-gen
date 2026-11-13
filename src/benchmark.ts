@@ -10,7 +10,7 @@
 //   cross     number of edge/edge crossings
 //   through   number of edges passing through a non-endpoint node
 //   labelHits labels overlapping a node or another label
-//   labelLines labels crossed by an edge
+//   labelLines labels crossed by an edge other than their own
 //   overlaps  edge pairs drawn on top of each other along a shared stretch
 //   bends     total 90°/polyline bends (curves count as 0), maxBends per edge
 // A summary of first-engine/second-engine ratios is printed and written to

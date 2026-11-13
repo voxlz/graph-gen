@@ -264,6 +264,27 @@ Behavior:
 - Unknown placeholders are left unchanged.
 - If `labelFormat` is omitted or empty, labels are rendered as written.
 
+### Edge label placement
+
+Edge label lines wider than `labelMaxWidth` (default `220` px) are wrapped at
+spaces; set it to `0` in the `graph { ... }` block to turn wrapping off.
+
+With the `curved` and `orthogonal` engines, each edge label touches its own
+edge, centred on it where there is room. A label beside its edge still has its
+edge pass through its middle, so it never drifts far from the edge. Labels keep clear of nodes (so
+arrowheads stay visible), other labels and other edges.
+
+With `curved`, a label that can't fit beside its edge stays where there is room
+and the edge bends to reach it, as long as the bend clears nodes, boundaries and
+other labels. Labels that still can't touch their edge become label nodes and
+the graph is laid out again: each such label pushes other nodes away and its
+edge is routed through it. This repeats until every label touches its edge. Control this with `labelNodes` in the
+`graph { ... }` block (or `GRAPHGEN_LABEL_NODES`):
+
+- `auto` (default): only for labels that can't touch their edge otherwise.
+- `true`: always. Every label sits on its edge, at the cost of larger layouts.
+- `false`: never.
+
 ## Reuse graph with new edges
 
 In threat modeling, you often want to reuse a base graph and add new edges to

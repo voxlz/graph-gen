@@ -313,6 +313,23 @@ constraints {
     expect(minimizedDistance).toBeCloseTo(exactClearance, 1);
   });
 
+  it("keeps the smaller of two per-node gaps between a pair", () => {
+    const nodes = [node("a", 100, 60), { ...node("label", 80, 20), gap: 6 }];
+    nodes[1].x = 300;
+    const result = solveLayout(nodes, [], [{ source: 0, target: 1 }], [], {
+      ...options,
+      nodeGap: 60,
+      preserveInitialPositions: true,
+      edgeRouting: "curved",
+      fastCompaction: true,
+    });
+
+    expect(result.valid).toBe(true);
+    const distance = Math.abs(nodes[1].x - nodes[0].x);
+    expect(distance).toBeGreaterThanOrEqual(50 + 40 + 6 - 1e-6);
+    expect(distance).toBeLessThan(50 + 40 + 60);
+  });
+
   it("orders differently sized rectangular nodes without overlap", () => {
     const nodes = [node("wide", 180, 40), node("tall", 50, 160)];
 

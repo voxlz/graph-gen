@@ -5,7 +5,7 @@
 // layout having to push nodes apart until straight lines fit:
 //   curved      one quadratic Bézier per edge (a single bend-free curve)
 //   orthogonal  axis-parallel segments joined by 90° bends (A* on a sparse grid)
-// Labels are then placed beside their routed edge.
+// Labels are then placed touching their routed edge.
 
 export type EdgeRouting = "straight" | "curved" | "orthogonal";
 
@@ -33,6 +33,9 @@ export interface RouteEdge {
   target: number;
   labelWidth?: number;
   labelHeight?: number;
+  // Centre of the edge's label node: the curve passes through it and the
+  // label sits there. Other edges keep clear of the label.
+  via?: Pt;
 }
 
 export interface RouteGroup {
@@ -59,9 +62,16 @@ export interface LabelSpot {
   y: number;
   anchorX: number;
   anchorY: number;
+  // No free spot was found: the label overlaps a node or another label.
+  blocked?: boolean;
+  // The label had to move away from its edge (see bendToLabels).
+  detached?: boolean;
 }
 
 const EPS = 1e-6;
+
+// Minimum gap between a label and any node: an arrowhead (10px) plus margin.
+export const LABEL_NODE_CLEARANCE = 16;
 
 function nodeBox(node: RouteNode, pad = 0): Box {
   return {
@@ -205,8 +215,39 @@ function polylineBounds(points: Pt[]): Box {
   return box;
 }
 
-// Obstacles an edge must avoid: every other node and every boundary that holds
-// neither endpoint.
+// Bounding box of the nodes and boundaries. Edges and labels reaching past
+// it make the drawing bigger.
+export function footprintOf(input: RouteInput): Box {
+  return [
+    ...input.nodes.map((node) => nodeBox(node)),
+    ...input.groups.map((group) => group.rect),
+  ].reduce(
+    (a, b) => ({
+      minX: Math.min(a.minX, b.minX),
+      minY: Math.min(a.minY, b.minY),
+      maxX: Math.max(a.maxX, b.maxX),
+      maxY: Math.max(a.maxY, b.maxY),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  );
+}
+
+// How far (summed over the four sides) `box` reaches past `footprint`.
+export function beyond(box: Box, footprint: Box): number {
+  return (
+    Math.max(0, footprint.minX - box.minX) +
+    Math.max(0, box.maxX - footprint.maxX) +
+    Math.max(0, footprint.minY - box.minY) +
+    Math.max(0, box.maxY - footprint.maxY)
+  );
+}
+
+// Cost per px a curve bulges out of the footprint: more than a longer path,
+// less than a crossing.
+const OUTSIDE_COST = 20;
+
+// Obstacles an edge must avoid: every other node, every boundary that holds
+// neither endpoint and the label nodes of other edges.
 function obstaclesFor(input: RouteInput, edge: RouteEdge): Box[] {
   const boxes: Box[] = [];
   input.nodes.forEach((node, index) => {
@@ -218,6 +259,15 @@ function obstaclesFor(input: RouteInput, edge: RouteEdge): Box[] {
     if (!group.members.has(edge.source) && !group.members.has(edge.target)) {
       boxes.push(expand(group.rect, input.clearance / 2));
     }
+  }
+  for (const other of input.edges) {
+    if (other === edge || !other.via) continue;
+    const box = labelBox(
+      other.via,
+      other.labelWidth ?? 0,
+      other.labelHeight ?? 0,
+    );
+    boxes.push(expand(box, input.clearance / 2));
   }
   return boxes;
 }
@@ -275,7 +325,20 @@ function curveRoute(
   return { points, curve };
 }
 
+// Control points of quadratic curves from p0 to p2 that pass through `via`,
+// reaching it at different parameters so the curve can lean either way.
+function viaControls(p0: Pt, via: Pt, p2: Pt): Pt[] {
+  return [0.5, 0.42, 0.58, 0.34, 0.66].map((t) => {
+    const u = 1 - t;
+    return {
+      x: (via.x - u * u * p0.x - t * t * p2.x) / (2 * u * t),
+      y: (via.y - u * u * p0.y - t * t * p2.y) / (2 * u * t),
+    };
+  });
+}
+
 export function routeCurved(input: RouteInput): EdgeRoute[] {
+  const footprint = footprintOf(input);
   const obstacles = input.edges.map((edge) => obstaclesFor(input, edge));
   const candidates = input.edges.map((edge) => {
     const s = input.nodes[edge.source];
@@ -293,23 +356,27 @@ export function routeCurved(input: RouteInput): EdgeRoute[] {
         shapes.push({ bulge, at }, { bulge: -bulge, at });
       }
     }
-    const controls = shapes.map(({ bulge, at }) => ({
-      x: s.x + (t.x - s.x) * at + normal.x * bulge * length * 2,
-      y: s.y + (t.y - s.y) * at + normal.y * bulge * length * 2,
-    }));
+    const controls = edge.via
+      ? viaControls(s, edge.via, t)
+      : shapes.map(({ bulge, at }) => ({
+          x: s.x + (t.x - s.x) * at + normal.x * bulge * length * 2,
+          y: s.y + (t.y - s.y) * at + normal.y * bulge * length * 2,
+        }));
     // Elbows: control points on the corners of the L between the endpoints, so
     // the curve leaves one node and reaches the other along an axis (e.g. a fan
     // from a hub into a column of nodes).
     const midX = (s.x + t.x) / 2;
     const midY = (s.y + t.y) / 2;
-    controls.push(
-      { x: s.x, y: t.y },
-      { x: t.x, y: s.y },
-      { x: midX, y: t.y },
-      { x: midX, y: s.y },
-      { x: s.x, y: midY },
-      { x: t.x, y: midY },
-    );
+    if (!edge.via) {
+      controls.push(
+        { x: s.x, y: t.y },
+        { x: t.x, y: s.y },
+        { x: midX, y: t.y },
+        { x: midX, y: s.y },
+        { x: s.x, y: midY },
+        { x: t.x, y: midY },
+      );
+    }
     return controls.map((control) => {
       // How far the curve's apex strays from the straight line, relative to
       // the edge length.
@@ -361,7 +428,11 @@ export function routeCurved(input: RouteInput): EdgeRoute[] {
           if (!boxesOverlap(bounds, chosenBounds[other])) continue;
           crossings += polylineCrossings(route.points, chosen[other].points);
         }
-        const cost = hits * 1e6 + crossings * 1e4 + base;
+        const cost =
+          hits * 1e6 +
+          crossings * 1e4 +
+          beyond(bounds, footprint) * OUTSIDE_COST +
+          base;
         if (cost < bestCost - EPS) {
           bestCost = cost;
           best = route;
@@ -889,6 +960,25 @@ function pointAlong(points: Pt[], fraction: number) {
   return { x: points[0].x, y: points[0].y, dx: 1, dy: 0 };
 }
 
+// A label may sit wholly beside its edge only when its centre is this close
+// to the edge; a larger label must have its edge pass through its middle half,
+// so it still reads as belonging to that edge.
+const LABEL_SIDE_REACH = 24;
+
+// The part of a label chip its own edge must pass through.
+function labelCore(box: Box): Box {
+  const inset = (half: number) =>
+    Math.min(half / 2, Math.max(2, half - LABEL_SIDE_REACH));
+  const dx = inset((box.maxX - box.minX) / 2);
+  const dy = inset((box.maxY - box.minY) / 2);
+  return {
+    minX: box.minX + dx,
+    maxX: box.maxX - dx,
+    minY: box.minY + dy,
+    maxY: box.maxY - dy,
+  };
+}
+
 function labelBox(spot: Pt, width: number, height: number): Box {
   return {
     minX: spot.x - width / 2 - 4,
@@ -898,32 +988,68 @@ function labelBox(spot: Pt, width: number, height: number): Box {
   };
 }
 
+// Labels touch their own edge when they can (centred on it if possible) and
+// keep clear of nodes, other labels and other edges. A label may always
+// overlap its own edge, but keeps LABEL_NODE_CLEARANCE from every node so
+// arrowheads stay visible. Edges routed through a label node (`via`) keep
+// their label there.
 export function placeRouteLabels(
   input: RouteInput,
   routes: EdgeRoute[],
 ): Array<LabelSpot | null> {
-  const nodeBoxes = input.nodes.map((node) => nodeBox(node, 2));
-  const placed: Box[] = [];
+  const nodeBoxes = input.nodes.map((node) =>
+    nodeBox(node, LABEL_NODE_CLEARANCE),
+  );
+  // Label-node labels are fixed, so the others are placed around them.
+  const placed: Box[] = input.edges.flatMap((edge) =>
+    edge.via
+      ? [labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0)]
+      : [],
+  );
   const routeBounds = routes.map((route) => polylineBounds(route.points));
+  // Label spots sticking out of the footprint grow the drawing, so they lose
+  // to spots inside.
+  const footprint = footprintOf(input);
   return input.edges.map((edge, index) => {
     const width = edge.labelWidth ?? 0;
     const height = edge.labelHeight ?? 0;
     if (!width || !height) return null;
+    if (edge.via) {
+      return { ...edge.via, anchorX: edge.via.x, anchorY: edge.via.y };
+    }
     const route = routes[index];
     let best: { spot: LabelSpot; box: Box; rank: number[] } | null = null;
-    for (const fraction of [
-      0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9,
-    ]) {
+    const core = labelCore(labelBox({ x: 0, y: 0 }, width, height));
+    // Candidates touch their own edge: on the line, or beside it as far as
+    // labelCore allows. Only when none of those is free does a label move
+    // further out. Centred labels are preferred, but only as a tie-break.
+    const fractions = [0.5];
+    for (let step = 0.04; step <= 0.4 + EPS; step += 0.04) {
+      fractions.push(0.5 - step, 0.5 + step);
+    }
+    for (const fraction of fractions) {
       const at = pointAlong(route.points, fraction);
       const normal = { x: -at.dy, y: at.dx };
+      // Distance from the label centre to its border along the normal, and
+      // how far it may sit off the edge while the edge still crosses its core.
       const reach =
-        Math.abs(normal.x) * (width / 2) + Math.abs(normal.y) * (height / 2);
+        Math.abs(normal.x) * (width / 2 + 4) +
+        Math.abs(normal.y) * (height / 2 + 2);
+      const beside = Math.max(
+        0,
+        (Math.abs(normal.x) * (core.maxX - core.minX)) / 2 +
+          (Math.abs(normal.y) * (core.maxY - core.minY)) / 2 -
+          1,
+      );
       for (const offset of [
-        reach + 6,
-        reach + 6 + input.clearance * 2,
-        reach + 6 + input.clearance * 5,
+        0,
+        beside / 2,
+        beside,
+        reach + input.clearance * 2,
+        reach + input.clearance * 5,
+        reach + input.clearance * 9,
       ]) {
-        for (const side of [1, -1]) {
+        for (const side of offset ? [1, -1] : [1]) {
           const spot = {
             x: at.x + normal.x * offset * side,
             y: at.y + normal.y * offset * side,
@@ -936,15 +1062,28 @@ export function placeRouteLabels(
           for (const other of placed)
             if (boxesOverlap(box, expand(other, 2))) hard++;
           let soft = 0;
+          const near = expand(box, 2);
           routes.forEach((other, otherIndex) => {
             if (
-              boxesOverlap(box, routeBounds[otherIndex]) &&
-              polylineHitsBox(other.points, box)
+              otherIndex !== index &&
+              boxesOverlap(near, routeBounds[otherIndex]) &&
+              polylineHitsBox(other.points, near)
             ) {
               soft++;
             }
           });
-          const rank = [hard, soft, Math.abs(fraction - 0.5), offset];
+          const detached = polylineHitsBox(route.points, labelCore(box))
+            ? 0
+            : 1;
+          const outside = beyond(box, footprint);
+          const rank = [
+            hard,
+            soft,
+            detached,
+            outside,
+            offset,
+            Math.abs(fraction - 0.5),
+          ];
           if (!best || compareRanks(rank, best.rank) < 0) {
             best = { spot, box, rank };
           }
@@ -952,8 +1091,95 @@ export function placeRouteLabels(
       }
     }
     placed.push(best!.box);
-    return best!.spot;
+    return {
+      ...best!.spot,
+      ...(best!.rank[0] > 0 ? { blocked: true } : {}),
+      ...(best!.rank[2] > 0 ? { detached: true } : {}),
+    };
   });
+}
+
+// Whether a drawn route passes through the core of the label at `spot`.
+export function routeTouchesLabel(
+  route: EdgeRoute,
+  spot: Pt,
+  width: number,
+  height: number,
+): boolean {
+  return polylineHitsBox(
+    route.points,
+    labelCore(labelBox(spot, width, height)),
+  );
+}
+
+// Curved routing only: an edge whose label had to move away from it is bent
+// to pass through the label's core, so the label touches its edge
+// without moving any node. A bend is kept only when it hits no node, foreign
+// boundary or other label and adds no crossings; the shortest such bend wins.
+export function bendToLabels(
+  input: RouteInput,
+  routes: EdgeRoute[],
+  spots: Array<LabelSpot | null>,
+): EdgeRoute[] {
+  const result = [...routes];
+  const boxes = spots.map((spot, i) =>
+    spot
+      ? labelBox(
+          spot,
+          input.edges[i].labelWidth ?? 0,
+          input.edges[i].labelHeight ?? 0,
+        )
+      : null,
+  );
+  input.edges.forEach((edge, index) => {
+    const box = boxes[index];
+    if (!box || polylineHitsBox(routes[index].points, labelCore(box))) return;
+    const s = input.nodes[edge.source];
+    const t = input.nodes[edge.target];
+    const core = labelCore(box);
+    const inner = expand(core, -1);
+    const obstacles = [
+      ...obstaclesFor(input, edge),
+      ...boxes.flatMap((other, i) =>
+        other && i !== index ? [expand(other, 2)] : [],
+      ),
+    ];
+    const crossings = (points: Pt[]) =>
+      result.reduce(
+        (sum, other, i) =>
+          i === index ? sum : sum + polylineCrossings(points, other.points),
+        0,
+      );
+    const allowed = crossings(result[index].points);
+    let best: EdgeRoute | null = null;
+    let bestLength = Infinity;
+    for (const fraction of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+      const at = pointAlong(routes[index].points, fraction);
+      const via = {
+        x: Math.min(inner.maxX, Math.max(inner.minX, at.x)),
+        y: Math.min(inner.maxY, Math.max(inner.minY, at.y)),
+      };
+      for (const control of viaControls(s, via, t)) {
+        const route = curveRoute(s, t, control);
+        const length = polylineLength(route.points);
+        if (length >= bestLength) continue;
+        if (!polylineHitsBox(route.points, core)) continue;
+        const bounds = polylineBounds(route.points);
+        if (
+          obstacles.some(
+            (o) => boxesOverlap(bounds, o) && polylineHitsBox(route.points, o),
+          )
+        ) {
+          continue;
+        }
+        if (crossings(route.points) > allowed) continue;
+        best = route;
+        bestLength = length;
+      }
+    }
+    if (best) result[index] = best;
+  });
+  return result;
 }
 
 // Indices of routes passing through a node or boundary they must avoid.
