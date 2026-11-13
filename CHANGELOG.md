@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.0.0
+
+- **Breaking:** `curved` is the new default layout engine (was `cola`). Set
+  `graph.layout "cola"` or `GRAPHGEN_LAYOUT=cola` to keep the old layouts.
+- New `curved` engine: each edge is one smooth curve routed around nodes and
+  boundaries, so edges never cross each other or pass through nodes and labels
+  sit beside their edge. Layouts are about 15% smaller than Cola's on average.
+- New `orthogonal` engine: like `curved`, with horizontal/vertical edges joined
+  by as few 90° bends as possible.
+- Nodes without edges (e.g. attackers) are moved into free space when that
+  makes the graph smaller.
+- `constraint` engine is much faster and also starts from a WebCola layout.
+- Faster rendering: the watcher, `render-all`, `generate` and the Docker image
+  run a precompiled bundle (`npm run build`), and the watcher renders up to four
+  graphs in parallel.
+- New `npm run benchmark` to compare engines on a folder of graphs.
+
 ## v3.0.5
 
 - Make Cola the default layout engine; `constraint` and `force` remain available
