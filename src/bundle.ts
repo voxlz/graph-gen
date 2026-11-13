@@ -49,7 +49,8 @@ export function buildBundle(): void {
     platform: "node",
     target: "node20",
     format: "cjs",
-    external: ["canvas"],
+    // esbuild is only needed to (re)build this bundle from the watcher.
+    external: ["canvas", "esbuild"],
     outfile: temporary,
     logLevel: "warning",
   });
@@ -69,7 +70,13 @@ export function rendererCommand(): { command: string; args: string[] } {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+// Run directly (npm run build); the file-name check keeps this from firing
+// inside the bundle itself.
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === __filename &&
+  /bundle\.[jt]s$/.test(__filename)
+) {
   buildBundle();
   console.log(`Built ${path.relative(rootDir, bundlePath)}`);
 }

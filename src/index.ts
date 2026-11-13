@@ -1,5 +1,7 @@
 // index.ts
 // Usage: tsx src/index.ts <input.ggn|input.json> [output.png] [style.jsonc]
+//        tsx src/index.ts --watch [path] [output-directory]
+//        tsx src/index.ts --help | --version
 //
 // Pipeline:
 //  1. Format and load the graph spec. A .ggn input is normalized by format.ts
@@ -9,6 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { handleInfoFlags, isWatchFlag } from "./cli";
 import { formatGraphFile } from "./format";
 import { resolveOutputPath } from "./output";
 import {
@@ -20,6 +23,13 @@ import {
 } from "./parse";
 import { renderErrorGraph, renderGraph } from "./render";
 import { validateGraph, type DiagnosticLocation } from "./validate";
+import { startWatch } from "./watch";
+
+const info = handleInfoFlags(process.argv.slice(2));
+if (info) {
+  process[info.stream].write(info.output);
+  process.exit(info.exitCode);
+}
 
 const inputPath = process.argv[2] || "graph.ggn";
 const cliOutputPath = process.argv[3];
@@ -167,7 +177,10 @@ function loadSpec(file: string, seen = new Set<string>()): ParseResult {
   return { spec: merged, errors: [] };
 }
 
-function writeResult(result: Promise<{ width: number; height: number }>) {
+function writeResult(
+  outputPath: string,
+  result: Promise<{ width: number; height: number }>,
+) {
   result
     .then(({ width, height }) => {
       console.log(`Wrote ${outputPath} (${width}x${height})`);
@@ -215,31 +228,38 @@ function formatParseDiagnostic(error: string) {
   });
 }
 
-const loaded = loadSpec(inputPath);
-const globalStyle = loadGlobalStyle();
-const outputPath = resolveOutputPath(
-  inputPath,
-  cliOutputPath,
-  loaded.spec.graph.outputPath ?? globalStyle.graph?.outputPath,
-);
-fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-if (loaded.errors.length > 0) {
-  const errors = loaded.errors.map(formatParseDiagnostic);
-  for (const error of errors) console.error(error);
-  writeResult(renderErrorGraph(errors, outputPath));
-} else {
-  const spec = loaded.spec;
-  if (spec.warnings.length) {
-    for (const warning of spec.warnings) console.warn(`[parse] ${warning}`);
+function renderFromArguments() {
+  const loaded = loadSpec(inputPath);
+  const globalStyle = loadGlobalStyle();
+  const outputPath = resolveOutputPath(
+    inputPath,
+    cliOutputPath,
+    loaded.spec.graph.outputPath ?? globalStyle.graph?.outputPath,
+  );
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  if (loaded.errors.length > 0) {
+    const errors = loaded.errors.map(formatParseDiagnostic);
+    for (const error of errors) console.error(error);
+    writeResult(outputPath, renderErrorGraph(errors, outputPath));
+  } else {
+    const spec = loaded.spec;
+    if (spec.warnings.length) {
+      for (const warning of spec.warnings) console.warn(`[parse] ${warning}`);
+    }
+    const validation = validateGraph(spec);
+    const errors = validation.errors.map((error, index) =>
+      formatDiagnostic("validate", error, validation.locations[index]),
+    );
+    for (const error of errors) console.error(error);
+    writeResult(
+      outputPath,
+      errors.length > 0
+        ? renderErrorGraph(errors, outputPath)
+        : renderGraph(spec, outputPath, stylePath),
+    );
   }
-  const validation = validateGraph(spec);
-  const errors = validation.errors.map((error, index) =>
-    formatDiagnostic("validate", error, validation.locations[index]),
-  );
-  for (const error of errors) console.error(error);
-  writeResult(
-    errors.length > 0
-      ? renderErrorGraph(errors, outputPath)
-      : renderGraph(spec, outputPath, stylePath),
-  );
 }
+
+const args = process.argv.slice(2);
+if (isWatchFlag(args[0])) startWatch(args[1], args[2]);
+else renderFromArguments();

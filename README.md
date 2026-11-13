@@ -84,7 +84,8 @@ docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.gg
 ```
 
 The image appears at `./out/output.png` on your machine. Replace the input and
-output paths with your own as needed.
+output paths with your own as needed. Run with `--help` for all arguments and
+environment variables, or `--version` for the installed version.
 
 The output argument is optional. If you omit it, graphgen picks the output path
 in this order:
@@ -134,16 +135,22 @@ npm run watch
 
 This watches the current project and mirrors generated images into `renders/`.
 To watch another path while respecting each graph's `outputPath`, the global
-`style.jsonc` setting, and the built-in default, run the watcher directly:
+`style.jsonc` setting, and the built-in default, use `--watch` (or `-w`):
 
 ```bash
-npx tsx src/watch.ts path/to/graphs
+npx tsx src/index.ts --watch path/to/graphs
 ```
 
 You can also provide an output directory explicitly:
 
 ```bash
-npx tsx src/watch.ts path/to/graphs path/to/renders
+npx tsx src/index.ts --watch path/to/graphs path/to/renders
+```
+
+With Docker, mount the graphs and keep the container running:
+
+```bash
+docker run --rm -v "$(pwd):/work" graphgen --watch /work/graphs /work/renders
 ```
 
 ## Showcase

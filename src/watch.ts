@@ -218,6 +218,12 @@ export function startWatch(
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+// Run directly (tsx src/watch.ts). The file-name check keeps this from firing
+// inside the dist/index.js bundle, where every module shares one __filename.
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === __filename &&
+  /watch\.[jt]s$/.test(__filename)
+) {
   startWatch(process.argv[2], process.argv[3]);
 }
