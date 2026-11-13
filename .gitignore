@@ -22,6 +22,8 @@ output.png
 /scopes/
 /usecases/
 /example/
+/examples/
+/examples-relaxed/
 /graph.txt
 
 # OS / editor noise

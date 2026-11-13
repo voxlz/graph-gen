@@ -11,6 +11,7 @@
     "render-frames": "tsx src/render-frames.ts",
     "watch": "tsx src/watch.ts . renders",
     "verify": "tsx src/verify.ts",
+    "benchmark": "tsx src/benchmark.ts",
     "render-strategies": "tsx tests/strategies/render-series.ts",
     "test": "jest",
     "lint": "eslint . --max-warnings 0",
