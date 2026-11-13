@@ -8,10 +8,14 @@ flowchart TD
   spec --> validate[validate.ts]
   validate --> render[render.ts]
   render --> engine{GRAPHGEN_LAYOUT}
-  engine -->|constraint| solve[solveLayout]
+  engine -->|constraint| seeds[Grid + WebCola seeds]
+  engine -->|curved (default) / orthogonal| seeds
+  seeds --> solve[solveLayout]
   solve --> minimize[minimizeLayout]
   engine -->|cola| cola[WebCola Layout.start]
-  minimize --> draw[Canvas drawing]
+  minimize -->|constraint| draw[Canvas drawing]
+  minimize -->|curved / orthogonal| route[routing.ts edge routes + labels]
+  route --> draw
   cola --> draw
   draw --> png[PNG]
 ```

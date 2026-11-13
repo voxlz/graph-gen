@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import * as cola from "webcola";
 import { emptyGraphSpec } from "../src/parse";
 import {
   formatEdgeLabel,
@@ -28,25 +27,30 @@ describe("renderGraph", () => {
     }
   });
 
-  it("uses the Cola layout by default", async () => {
+  it("uses the curved layout by default", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-cola-default-"),
+      path.join(os.tmpdir(), "graphgen-render-curved-default-"),
     );
     const output = path.join(directory, "graph.png");
+    const dump = path.join(directory, "dump.json");
     const previousLayout = process.env.GRAPHGEN_LAYOUT;
-    const start = jest.spyOn(cola.Layout.prototype, "start");
+    const previousDump = process.env.GRAPHGEN_DUMP;
     delete process.env.GRAPHGEN_LAYOUT;
+    process.env.GRAPHGEN_DUMP = dump;
 
     try {
       await renderGraph(emptyGraphSpec(), output);
 
-      expect(start).toHaveBeenCalled();
+      expect(JSON.parse(fs.readFileSync(dump, "utf8")).meta.layout).toBe(
+        "curved",
+      );
     } finally {
-      start.mockRestore();
-      if (previousLayout === undefined) {
-        delete process.env.GRAPHGEN_LAYOUT;
-      } else {
-        process.env.GRAPHGEN_LAYOUT = previousLayout;
+      for (const [key, value] of [
+        ["GRAPHGEN_LAYOUT", previousLayout],
+        ["GRAPHGEN_DUMP", previousDump],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
       }
       fs.rmSync(directory, { recursive: true, force: true });
     }

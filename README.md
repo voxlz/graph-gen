@@ -290,13 +290,21 @@ styles; only the file being rendered contributes edges.
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
 
-### Layout engines: cola vs custom constraint
+### Layout engines
 
 Set `graph.layout` to choose how nodes are positioned:
 
-- `cola` (default) — WebCola layout pass.
-- `constraint` — custom engine focused on predictable constraints and
-  explicit validation of constraints and overlap rules.
+- `curved` (default) — each edge is a single curve routed around nodes and
+  boundaries, so nodes don't have to be pushed apart to make room for straight
+  edges. Edges never cross each other or pass through nodes, and labels are
+  placed beside their edge. Several starting layouts (WebCola variants and a
+  grid) are compacted and the most compact routed result is kept.
+- `orthogonal` — like `curved`, but edges are horizontal and vertical segments
+  joined by as few 90° bends as possible.
+- `constraint` — straight edges that never cross each other, nodes, or labels.
+  It solves from both a grid and a WebCola starting layout and keeps the more
+  compact result.
+- `cola` — plain WebCola layout pass (edges may cross nodes and labels).
 - `force` — force-directed layout.
 
 If the same setting appears in multiple places, this precedence applies:
@@ -304,7 +312,7 @@ If the same setting appears in multiple places, this precedence applies:
 1. `GRAPHGEN_LAYOUT` environment variable
 2. per-graph `graph { layout "..." }`
 3. global style `style.jsonc` (`graph.layout`)
-4. default `cola`
+4. default `curved`
 
 Examples:
 
@@ -313,7 +321,7 @@ Global default in `style.jsonc`:
 ```jsonc
 {
   "graph": {
-    "layout": "cola",
+    "layout": "curved",
   },
 }
 ```
@@ -328,6 +336,13 @@ graph {
 
 You can also set `graph.layoutIterations` (or `GRAPHGEN_LAYOUT_ITERS`) to
 control how many iterations the `constraint` engine can use before stopping.
+
+To compare engines on a folder of graphs, run
+`npm run benchmark -- <folder>`. It renders every `.ggn` file with each
+engine in `BENCH_ENGINES` (default `curved,cola`) and reports image area,
+edge lengths, crossings, edges through nodes, label collisions, and layout time.
+`BENCH_FILTER` limits the graphs, `BENCH_JOBS=1` gives reliable timings, and
+Cola results are cached (`BENCH_FRESH=1` re-renders them).
 
 A graph's own `shapes { ... }` block overrides global shape defaults for that
 graph only, and a custom style file can be passed per render (the optional third
