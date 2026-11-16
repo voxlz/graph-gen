@@ -5,6 +5,8 @@ import { applyForceLayout, DEFAULT_FORCE_LAYOUT } from "./force-layout";
 import { createCanvas } from "canvas";
 import { stripComments, type GraphSpec } from "./parse";
 import {
+  boundaryLabelBox,
+  groupRectsFor,
   directionalSlack,
   placeEdgelessAndCompact,
   shiftWithDependents,
@@ -24,6 +26,8 @@ import {
   polylineCrossings,
   polylineLength,
   routeEdges,
+  segmentHitsBox,
+  type Box,
   type EdgeRoute,
   type EdgeRouting,
 } from "./routing";
@@ -632,6 +636,8 @@ export async function renderGraph(
 
   // --- text measuring (for sizing nodes to their labels) ----------------------
   const NODE_FONT = "14px sans-serif";
+  const GROUP_FONT = "italic 13px sans-serif";
+  const GROUP_LINE_HEIGHT = 16;
   const TITLE_FONT = "bold 22px sans-serif";
   const measureCanvas = createCanvas(10, 10);
   const measureCtx = measureCanvas.getContext("2d");
@@ -665,7 +671,46 @@ export async function renderGraph(
   });
 
   // --- build groups from boundaries -------------------------------------------
-  const boundaries: any[] = spec.boundaries || [];
+  measureCtx.font = GROUP_FONT;
+  const boundaries: any[] = (spec.boundaries || []).map((boundary) => {
+    const lines: string[] =
+      boundary.draw !== false && boundary.label
+        ? boundary.label.split("\n")
+        : [];
+    return {
+      ...boundary,
+      labelWidth: lines.length
+        ? Math.ceil(
+            Math.max(
+              ...lines.map((line) => measureCtx.measureText(line).width),
+            ),
+          ) + 2
+        : 0,
+      labelHeight: lines.length * GROUP_LINE_HEIGHT,
+    };
+  });
+  measureCtx.font = NODE_FONT;
+  const groupLabelHeight = Math.max(
+    0,
+    ...boundaries.map((boundary) => boundary.labelHeight),
+  );
+  if (groupLabelHeight > 0) {
+    graphMeta.labelBand = Math.max(
+      graphMeta.labelBand,
+      groupLabelHeight + 10 - graphMeta.boundaryPad,
+    );
+    if (boundaries.some((boundary) => boundary.parent)) {
+      graphMeta.nestPad = Math.max(graphMeta.nestPad, groupLabelHeight + 10);
+    }
+  }
+  const groupGeometryOptions = {
+    minGap: graphMeta.minGap,
+    nodeGap: graphMeta.nodeGap,
+    boundaryPad: graphMeta.boundaryPad,
+    labelBand: graphMeta.labelBand,
+    nestPad: graphMeta.nestPad,
+    iterations: 0,
+  };
   const boundaryIdToGroupIndex: Record<string, number> = {};
   boundaries.forEach((b, gi) => (boundaryIdToGroupIndex[b.id] = gi));
 
@@ -1066,33 +1111,8 @@ export async function renderGraph(
     nodes.forEach((n, i) => Object.assign(n, positions[i]));
     if (labels) links.forEach((link, i) => Object.assign(link, labels[i]));
     const members = memberSetsById();
-    const rects = new Map<string, any>();
-    boundaries.forEach((b: any) => {
-      const set = members.get(b.id);
-      if (!set || set.size === 0) return;
-      if (groupRects?.get(b.id)) {
-        rects.set(b.id, groupRects.get(b.id));
-        return;
-      }
-      const pad = b.draw === false ? 0 : paddingFor(b);
-      const band = b.draw === false ? 0 : LABEL_BAND;
-      let r = {
-        minX: Infinity,
-        minY: Infinity,
-        maxX: -Infinity,
-        maxY: -Infinity,
-      };
-      for (const i of set) {
-        const n = nodes[i];
-        r = {
-          minX: Math.min(r.minX, n.x - n.width / 2 - pad),
-          maxX: Math.max(r.maxX, n.x + n.width / 2 + pad),
-          minY: Math.min(r.minY, n.y - n.height / 2 - pad - band),
-          maxY: Math.max(r.maxY, n.y + n.height / 2 + pad),
-        };
-      }
-      rects.set(b.id, r);
-    });
+    const rects =
+      groupRects ?? groupRectsFor(nodes, boundaries, groupGeometryOptions);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -1130,7 +1150,13 @@ export async function renderGraph(
       groups: boundaries.flatMap((b: any) =>
         b.draw === false || !rects.get(b.id)
           ? []
-          : [{ rect: rects.get(b.id), members: members.get(b.id)! }],
+          : [
+              {
+                rect: rects.get(b.id)!,
+                members: members.get(b.id)!,
+                label: boundaryLabelBox(b, rects.get(b.id)!) ?? undefined,
+              },
+            ],
       ),
       clearance: routeClearance,
     };
@@ -1775,6 +1801,27 @@ export async function renderGraph(
       n.width -= GAP;
       n.height -= GAP;
     }
+    if (groupLabelHeight > 0) {
+      const repaired = solveLayout(
+        nodes,
+        boundaries,
+        links,
+        spec.constraints || [],
+        {
+          ...groupGeometryOptions,
+          iterations: 1000,
+          preserveInitialPositions: true,
+          minimizeIterations: 0,
+          groupLabelsOnly: true,
+        },
+      );
+      if (!repaired.valid) {
+        throw new Error(
+          `group label layout did not converge: ${repaired.violations.join("; ")}`,
+        );
+      }
+      constraintGroupRects = repaired.groups;
+    }
   } else {
     throw new Error(
       `unknown graph.layout ${JSON.stringify(graphMeta.layout)}; expected "constraint", "curved", "orthogonal", "force", or "cola"`,
@@ -1816,36 +1863,15 @@ export async function renderGraph(
   }
   const memberSets = groups.map((_, gi) => new Set(descendantNodeIndices(gi)));
 
-  // render padding (for the drawn box); the solver padding above is larger.
-  function renderRect(gi: number): any {
-    const pad = paddingFor(boundaries[gi]);
-    const band = boundaries[gi].draw === false ? 0 : LABEL_BAND;
-    let mnX = Infinity,
-      mnY = Infinity,
-      mxX = -Infinity,
-      mxY = -Infinity;
-    for (const i of memberSets[gi]) {
-      const n = nodes[i];
-      mnX = Math.min(mnX, n.x - n.width / 2);
-      mxX = Math.max(mxX, n.x + n.width / 2);
-      mnY = Math.min(mnY, n.y - n.height / 2);
-      mxY = Math.max(mxY, n.y + n.height / 2);
-    }
-    if (!isFinite(mnX)) return null;
-    return {
-      minX: mnX - pad,
-      maxX: mxX + pad,
-      minY: mnY - pad - band,
-      maxY: mxY + pad,
-    };
-  }
-
   // --- compute group rects for rendering --------------------------------------
   // WebCola's native hierarchical grouping (with handleDisconnected(false)) keeps
   // disjoint groups from overlapping and nested groups contained, so no manual
   // separation pass is needed; we just draw a box around each group's members.
+  const finalGroupRects =
+    constraintGroupRects ??
+    groupRectsFor(nodes, boundaries, groupGeometryOptions);
   groups.forEach((g, gi) => {
-    g._rect = constraintGroupRects?.get(boundaries[gi].id) ?? renderRect(gi);
+    g._rect = finalGroupRects.get(boundaries[gi].id) ?? null;
   });
 
   // --- route edges around obstacles (curved / orthogonal engines) -------------
@@ -1859,7 +1885,13 @@ export async function renderGraph(
       groups: groups.flatMap((g, gi) =>
         boundaries[gi].draw === false || !g._rect
           ? []
-          : [{ rect: g._rect, members: memberSets[gi] }],
+          : [
+              {
+                rect: g._rect,
+                members: memberSets[gi],
+                label: boundaryLabelBox(boundaries[gi], g._rect) ?? undefined,
+              },
+            ],
       ),
       clearance: routeClearance,
     };
@@ -2059,11 +2091,15 @@ export async function renderGraph(
 
       if (b.label) {
         ctx.save();
-        ctx.font = "italic 13px sans-serif";
+        ctx.font = GROUP_FONT;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillStyle = "#666666";
-        ctx.fillText(b.label, x + 8, y + 6);
+        b.label
+          .split("\n")
+          .forEach((line: string, index: number) =>
+            ctx.fillText(line, x + 8, y + 6 + index * GROUP_LINE_HEIGHT),
+          );
         ctx.restore();
       }
     });
@@ -2374,6 +2410,51 @@ export async function renderGraph(
     });
   }
 
+  const groupTitles = groups.flatMap((group, index) => {
+    const box = group._rect && boundaryLabelBox(boundaries[index], group._rect);
+    return box ? [{ id: group.id, box }] : [];
+  });
+  const overlaps = (a: Box, b: Box) =>
+    a.minX < b.maxX - 1e-6 &&
+    a.maxX > b.minX + 1e-6 &&
+    a.minY < b.maxY - 1e-6 &&
+    a.maxY > b.minY + 1e-6;
+  for (const [index, title] of groupTitles.entries()) {
+    const nodeHit = nodes.find((node) =>
+      overlaps(title.box, {
+        minX: node.x - node.width / 2,
+        maxX: node.x + node.width / 2,
+        minY: node.y - node.height / 2,
+        maxY: node.y + node.height / 2,
+      }),
+    );
+    const titleHit = groupTitles
+      .slice(index + 1)
+      .find((other) => overlaps(title.box, other.box));
+    const canvasBox = {
+      minX: title.box.minX + offsetX,
+      maxX: title.box.maxX + offsetX,
+      minY: title.box.minY + offsetY,
+      maxY: title.box.maxY + offsetY,
+    };
+    const labelHit = labelRects.find((label) => overlaps(canvasBox, label));
+    const edgeHit = drawnPaths.findIndex((points) =>
+      points
+        .slice(1)
+        .some((point, i) => segmentHitsBox(points[i], point, canvasBox)),
+    );
+    if (nodeHit || titleHit || labelHit || edgeHit >= 0) {
+      const conflict = nodeHit
+        ? `node ${nodeHit.id}`
+        : titleHit
+          ? `group label ${titleHit.id}`
+          : labelHit
+            ? `label ${labelHit.source} -> ${labelHit.target}`
+            : `edge ${links[edgeHit]._sourceId} -> ${links[edgeHit]._targetId}`;
+      throw new Error(`group label ${title.id} overlaps ${conflict}`);
+    }
+  }
+
   // --- optional debug dump (positions + group rects) for testing --------------
   if (process.env.GRAPHGEN_DUMP) {
     const dump = {
@@ -2395,6 +2476,7 @@ export async function renderGraph(
         id: g.id,
         rect: g._rect,
         parent: boundaries[gi].parent ?? null,
+        label: g._rect ? boundaryLabelBox(boundaries[gi], g._rect) : null,
       })),
       // Drawn edge paths and label boxes, in layout coordinates.
       edges: links.map((l, i) => ({

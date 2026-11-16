@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.4.0
+
+- Group titles are now label obstacles in every render mode: nodes, edges and
+  other labels keep clear of them. Long, multiline and nested titles reserve
+  enough space; hidden groups do not reserve title space.
+- Orthogonal runs keep at least 6 px from parallel group borders while still
+  allowing edges to cross a border to enter or leave a group.
+- Orthogonal routes are simplified again after label placement to remove
+  redundant doglegs, including routes through label nodes, while preserving
+  label contact, centred endpoints and collision clearances.
+- Prevented route simplification from introducing immediate backtracking.
+  Final routes prefer fewer bends over full-length interior sections while
+  retaining the preference for 20 px endpoint approaches and 10 px label
+  no-turn margins. This removes the unnecessary Weather API to Redis detour
+  in the weather scope without changing the weather UC1 layout.
+- Regenerated example renders for all render modes.
+
 ## v4.3.0
 
 - Orthogonal edges now connect at node-side centres. Subpixel alignment

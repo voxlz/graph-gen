@@ -21,6 +21,8 @@ export interface LayoutBoundary {
   id: string;
   parent?: string | null;
   draw?: boolean;
+  labelWidth?: number;
+  labelHeight?: number;
 }
 
 export interface LayoutEdge {
@@ -73,6 +75,8 @@ export interface LayoutOptions {
   fastCompaction?: boolean;
   // Pull toward the container centre during compaction, relative to one edge.
   compactCenterPull?: number;
+  // Cola keeps its straight-edge layout; only repair group-title collisions.
+  groupLabelsOnly?: boolean;
 }
 
 export interface LayoutSnapshot {
@@ -325,7 +329,12 @@ function rectFromMembers(
   const padding = visible
     ? ctx.options.boundaryPad + ctx.options.nestPad * (ctx.maxDepth - depth)
     : 0;
-  const labelBand = visible ? ctx.options.labelBand : 0;
+  const labelBand = visible
+    ? Math.max(
+        ctx.options.labelBand,
+        boundary?.labelHeight ? boundary.labelHeight + 10 - padding : 0,
+      )
+    : 0;
   const rect = members.reduce<LayoutRect>(
     (result, index) => {
       const current = nodeRect(ctx.nodes[index]);
@@ -337,12 +346,57 @@ function rectFromMembers(
     },
     { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
   );
-  return {
+  const result = {
     minX: rect.minX - padding,
     maxX: rect.maxX + padding,
     minY: rect.minY - padding - labelBand,
     maxY: rect.maxY + padding,
   };
+  if (visible && boundary?.labelWidth) {
+    result.maxX = Math.max(result.maxX, result.minX + boundary.labelWidth + 16);
+  }
+  for (const child of ctx.boundaries) {
+    if (child.parent !== boundaryId) continue;
+    const childRect = rectFromMembers(ctx, child.id);
+    if (childRect) {
+      result.maxX = Math.max(
+        result.maxX,
+        childRect.maxX + (visible ? ctx.options.nestPad : 0),
+      );
+    }
+  }
+  return result;
+}
+
+export function boundaryLabelBox(
+  boundary: LayoutBoundary,
+  rect: LayoutRect,
+): LayoutRect | null {
+  if (boundary.draw === false || !boundary.labelWidth || !boundary.labelHeight)
+    return null;
+  return {
+    minX: rect.minX + 6,
+    maxX: rect.minX + 10 + boundary.labelWidth,
+    minY: rect.minY + 4,
+    maxY: rect.minY + 8 + boundary.labelHeight,
+  };
+}
+
+export function groupRectsFor(
+  nodes: LayoutNode[],
+  boundaries: LayoutBoundary[],
+  options: LayoutOptions,
+): Map<string, LayoutRect> {
+  return allGroupRects(makeContext(nodes, boundaries, [], [], options));
+}
+
+function groupLabelRects(ctx: LayoutContext): LayoutRect[] {
+  const rects = allGroupRects(ctx);
+  return ctx.boundaries.flatMap((boundary) => {
+    const rect = rects.get(boundary.id);
+    const label = rect && boundaryLabelBox(boundary, rect);
+    return label ? [label] : [];
+  });
 }
 
 function allGroupRects(ctx: LayoutContext): Map<string, LayoutRect> {
@@ -1022,6 +1076,67 @@ function resolveEdgeBoundaryIntersections(ctx: LayoutContext) {
   }
 }
 
+function resolveEdgeGroupLabelIntersections(ctx: LayoutContext) {
+  for (const edge of ctx.edges) {
+    const [source, target] = edgeNodeIndices(edge, ctx);
+    for (const boundary of ctx.boundaries) {
+      const group = rectFromMembers(ctx, boundary.id);
+      const label = group && boundaryLabelBox(boundary, group);
+      if (!label || !segmentIntersectsRect(edgeSegment(edge, ctx), label))
+        continue;
+      const clearance = expandRect(label, NODE_EDGE_CLEARANCE);
+      const corners = [
+        { x: clearance.minX, y: clearance.minY },
+        { x: clearance.minX, y: clearance.maxY },
+        { x: clearance.maxX, y: clearance.minY },
+        { x: clearance.maxX, y: clearance.maxY },
+      ];
+      chooseBestMove(
+        ctx,
+        [source, target].flatMap((endpoint) => {
+          const moving = ctx.nodes[endpoint];
+          const anchor = ctx.nodes[endpoint === source ? target : source];
+          const moves = corners.flatMap((corner) => {
+            const result: Array<{ dx: number; dy: number }> = [];
+            // Move one end onto a ray tangent to the padded title.
+            if (Math.abs(corner.y - anchor.y) > EPSILON) {
+              const t = (moving.y - anchor.y) / (corner.y - anchor.y);
+              if (t > 1)
+                result.push({
+                  dx: anchor.x + (corner.x - anchor.x) * t - moving.x,
+                  dy: 0,
+                });
+            }
+            if (Math.abs(corner.x - anchor.x) > EPSILON) {
+              const t = (moving.x - anchor.x) / (corner.x - anchor.x);
+              if (t > 1)
+                result.push({
+                  dx: 0,
+                  dy: anchor.y + (corner.y - anchor.y) * t - moving.y,
+                });
+            }
+            return result;
+          });
+          return moves.map((move) => ({
+            entities: directionalClosure(
+              ctx,
+              ctx.nodes[endpoint].id,
+              move.dx,
+              move.dy,
+            ),
+            ...move,
+          }));
+        }),
+        () => {
+          const current = rectFromMembers(ctx, boundary.id);
+          const box = current && boundaryLabelBox(boundary, current);
+          return !box || !segmentIntersectsRect(edgeSegment(edge, ctx), box);
+        },
+      );
+    }
+  }
+}
+
 function resolveEdgeCrossings(ctx: LayoutContext) {
   for (let first = 0; first < ctx.edges.length; first++) {
     const firstNodes = edgeNodeIndices(ctx.edges[first], ctx);
@@ -1137,6 +1252,7 @@ function placeLabels(ctx: LayoutContext): LabelPlacement[] {
   const placements: LabelPlacement[] = [];
   const segments = ctx.edges.map((edge) => edgeSegment(edge, ctx));
   const nodeRects = ctx.nodes.map((node) => nodeRect(node, 2));
+  const groupLabels = groupLabelRects(ctx);
   for (const [edgeIndex, edge] of ctx.edges.entries()) {
     if (!edge.label || !edge.labelWidth || !edge.labelHeight) continue;
     const segment = segments[edgeIndex];
@@ -1176,9 +1292,12 @@ function placeLabels(ctx: LayoutContext): LabelPlacement[] {
           const nodeCollisions = nodeRects.filter((nodeBox) =>
             rectanglesOverlap(rect, nodeBox),
           ).length;
-          const labelCollisions = placements.filter((placement) =>
-            rectanglesOverlap(rect, expandRect(placement.rect, 2)),
-          ).length;
+          const labelCollisions =
+            placements.filter((placement) =>
+              rectanglesOverlap(rect, expandRect(placement.rect, 2)),
+            ).length +
+            groupLabels.filter((label) => rectanglesOverlap(rect, label))
+              .length;
           const lineCollisions = segments.filter(
             (other, index) =>
               index !== edgeIndex &&
@@ -1305,6 +1424,21 @@ function collectViolations(
   if (routesEdges(ctx)) return { messages, placements: [] };
 
   const segments = ctx.edges.map((edge) => edgeSegment(edge, ctx));
+  const groupLabels = groupLabelRects(ctx);
+  for (const [index, segment] of segments.entries()) {
+    if (groupLabels.some((label) => segmentIntersectsRect(segment, label))) {
+      add(`edge ${index + 1} intersects a group label`);
+      if (done()) return result();
+    }
+  }
+  if (ctx.options.groupLabelsOnly) {
+    const placements = includeLabels ? placeLabels(ctx) : [];
+    for (const placement of placements) {
+      if (groupLabels.some((label) => rectanglesOverlap(placement.rect, label)))
+        add(`label on edge ${placement.edge + 1} overlaps a group label`);
+    }
+    return { messages, placements };
+  }
   const clearanceNodes = ctx.nodes.map((node) =>
     nodeRect(node, NODE_EDGE_CLEARANCE),
   );
@@ -1868,7 +2002,13 @@ function incrementalArea(
     if (i !== index) grow(fixed, nodeRect(other));
   }
   // Per containing boundary: its padding and the bounds of its other members.
-  const own: Array<{ rest: LayoutRect; pad: number; band: number }> = [];
+  const own: Array<{
+    rest: LayoutRect;
+    pad: number;
+    band: number;
+    minWidth: number;
+    outerPad: number;
+  }> = [];
   for (const boundary of ctx.boundaries) {
     const members = ctx.memberSets.get(boundary.id);
     if (!members || members.size === 0) continue;
@@ -1877,7 +2017,18 @@ function incrementalArea(
       ? ctx.options.boundaryPad +
         ctx.options.nestPad * (ctx.maxDepth - boundaryDepth(ctx, boundary.id))
       : 0;
-    const band = visible ? ctx.options.labelBand : 0;
+    const band = visible
+      ? Math.max(
+          ctx.options.labelBand,
+          boundary.labelHeight ? boundary.labelHeight + 10 - pad : 0,
+        )
+      : 0;
+    const minWidth =
+      visible && boundary.labelWidth ? boundary.labelWidth + 16 : 0;
+    const outerPad =
+      boundaryAncestors(ctx, boundary.id).filter(
+        (id) => ctx.boundaryById.get(id)?.draw !== false,
+      ).length * ctx.options.nestPad;
     const rest = empty();
     for (const i of members) {
       if (i !== index) grow(rest, nodeRect(ctx.nodes[i]));
@@ -1886,14 +2037,15 @@ function incrementalArea(
       if (Number.isFinite(rest.minX)) {
         grow(fixed, {
           minX: rest.minX - pad,
-          maxX: rest.maxX + pad,
+          maxX:
+            Math.max(rest.maxX + pad, rest.minX - pad + minWidth) + outerPad,
           minY: rest.minY - pad - band,
           maxY: rest.maxY + pad,
         });
       }
       continue;
     }
-    own.push({ rest, pad, band });
+    own.push({ rest, pad, band, minWidth, outerPad });
   }
   return (x, y) => {
     const box = {
@@ -1904,12 +2056,12 @@ function incrementalArea(
     };
     const total = { ...fixed };
     grow(total, box);
-    for (const { rest, pad, band } of own) {
+    for (const { rest, pad, band, minWidth, outerPad } of own) {
       const r = { ...rest };
       grow(r, box);
       grow(total, {
         minX: r.minX - pad,
-        maxX: r.maxX + pad,
+        maxX: Math.max(r.maxX + pad, r.minX - pad + minWidth) + outerPad,
         minY: r.minY - pad - band,
         maxY: r.maxY + pad,
       });
@@ -2100,6 +2252,12 @@ function repairPass(ctx: LayoutContext) {
   resolveNodeOverlaps(ctx);
   resolveBoundaryOverlaps(ctx);
   if (routesEdges(ctx)) {
+    resolveDirectionalConstraints(ctx);
+    return;
+  }
+  resolveEdgeGroupLabelIntersections(ctx);
+  if (ctx.options.groupLabelsOnly) {
+    placeLabels(ctx);
     resolveDirectionalConstraints(ctx);
     return;
   }

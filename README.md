@@ -291,6 +291,21 @@ edge is routed through it. This repeats until every label touches its edge. Cont
 If an orthogonal edge still cannot reach its label, the renderer warns and keeps
 the original edge and detached label.
 
+### Group labels
+
+Visible boundary titles are label obstacles in every render mode: nodes, edges
+and other labels keep clear of them, including edges entering or leaving that
+boundary. Boundaries reserve enough space for long or multiline titles and for
+nested group labels, even when smaller padding is configured. Hidden groups
+(`draw false`) do not reserve title space.
+
+Orthogonal edge runs also keep at least 6 px from parallel group borders.
+Edges can still cross a border to enter or leave a group.
+After labels are placed, orthogonal routes are simplified again to remove
+redundant doglegs while preserving label contact and collision clearances.
+This rejects immediate backtracking and prefers fewer bends over 20 px
+interior sections, while retaining the preference for 20 px endpoint approaches.
+
 ## Reuse graph with new edges
 
 In threat modeling, you often want to reuse a base graph and add new edges to

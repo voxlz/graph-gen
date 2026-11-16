@@ -213,6 +213,89 @@ describe("placeRouteLabels", () => {
 });
 
 describe("routeOrthogonal", () => {
+  it("removes redundant doglegs even when the route already touches its label", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 400, y: 200, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1, labelWidth: 80, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const spot = { x: 200, y: 100, anchorX: 200, anchorY: 100 };
+    const [route] = bendOrthogonalToLabels(
+      input,
+      [
+        {
+          points: [
+            { x: 50, y: 0 },
+            { x: 120, y: 0 },
+            { x: 120, y: 60 },
+            { x: 200, y: 60 },
+            { x: 200, y: 140 },
+            { x: 280, y: 140 },
+            { x: 280, y: 200 },
+            { x: 350, y: 200 },
+          ],
+        },
+      ],
+      [spot],
+    );
+    expect(route.points).toEqual([
+      { x: 50, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 200 },
+      { x: 350, y: 200 },
+    ]);
+    expect(routeTouchesLabel(route, spot, 80, 16)).toBe(true);
+  });
+
+  it("keeps parallel sections off a group border while allowing crossings", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 400, y: 200, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1 }],
+      groups: [
+        {
+          rect: { minX: 200, minY: 100, maxX: 500, maxY: 300 },
+          members: new Set([1]),
+        },
+      ],
+      clearance: 8,
+    };
+    const [{ points }] = routeOrthogonal(input);
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      if (
+        Math.abs(a.x - b.x) < 1e-6 &&
+        Math.max(a.y, b.y) > 100 &&
+        Math.min(a.y, b.y) < 300
+      ) {
+        expect(
+          Math.min(Math.abs(a.x - 200), Math.abs(a.x - 500)),
+        ).toBeGreaterThanOrEqual(6 - 1e-6);
+      }
+      if (
+        Math.abs(a.y - b.y) < 1e-6 &&
+        Math.max(a.x, b.x) > 200 &&
+        Math.min(a.x, b.x) < 500
+      ) {
+        expect(
+          Math.min(Math.abs(a.y - 100), Math.abs(a.y - 300)),
+        ).toBeGreaterThanOrEqual(6 - 1e-6);
+      }
+    }
+    expect(points[0]).toMatchObject({ x: 50, y: 0 });
+    const end = points.at(-1)!;
+    expect(
+      (end.x === 350 && end.y === 200) || (end.x === 400 && end.y === 170),
+    ).toBe(true);
+  });
+
   it("keeps aligned endpoints straight through an off-center label node", () => {
     const input: RouteInput = {
       nodes: [
@@ -235,6 +318,46 @@ describe("routeOrthogonal", () => {
     expect(route.points).toHaveLength(2);
     expect(route.points.every((point) => point.x === 0)).toBe(true);
     expect(routeTouchesLabel(route, input.edges[0].via!, 100, 20)).toBe(true);
+  });
+
+  describe("group title obstacles", () => {
+    it.each(["curved", "orthogonal"] as const)(
+      "keeps %s edges and edge labels clear of their own group's title",
+      (mode) => {
+        const label = { minX: -54, maxX: 180, minY: -76, maxY: -54 };
+        const input: RouteInput = {
+          nodes: [
+            { x: 0, y: 0, width: 100, height: 60 },
+            { x: 0, y: -200, width: 100, height: 60 },
+          ],
+          edges: [{ source: 0, target: 1, labelWidth: 100, labelHeight: 16 }],
+          groups: [
+            {
+              rect: { minX: -60, maxX: 460, minY: -80, maxY: 160 },
+              members: new Set([0]),
+              label,
+            },
+          ],
+          clearance: 8,
+        };
+        const routes =
+          mode === "curved" ? routeCurved(input) : routeOrthogonal(input);
+        const [spot] = placeRouteLabels(input, routes, mode);
+        expect(
+          routes[0].points
+            .slice(1)
+            .some((point, i) =>
+              segmentHitsBox(routes[0].points[i], point, label),
+            ),
+        ).toBe(false);
+        expect(
+          spot!.x + 54 <= label.minX ||
+            spot!.x - 54 >= label.maxX ||
+            spot!.y + 10 <= label.minY ||
+            spot!.y - 10 >= label.maxY,
+        ).toBe(true);
+      },
+    );
   });
 
   it("routes through a label node without turning behind it", () => {
@@ -333,6 +456,9 @@ describe("routeOrthogonal", () => {
     expect(routeTouchesLabel({ points }, input.edges[0].via!, 80, 20)).toBe(
       false,
     );
+    const [spot] = placeRouteLabels(input, [{ points }], "orthogonal");
+    expect(spot!.blocked).toBeUndefined();
+    expect(routeTouchesLabel({ points }, spot!, 80, 20)).toBe(true);
   });
 
   it("reroutes a detached label on a straight section without hiding bends", () => {
@@ -630,6 +756,40 @@ describe("routeOrthogonal", () => {
         ),
       ).toBeGreaterThanOrEqual(20);
     }
+  });
+
+  it("simplifies a near-aligned detour without backtracking or short endpoint approaches", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 15, width: 100, height: 90 },
+        { x: 208, y: 0, width: 100, height: 100 },
+      ],
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 8,
+    };
+    const [route] = bendOrthogonalToLabels(
+      input,
+      [
+        {
+          points: [
+            { x: 50, y: 15 },
+            { x: 70, y: 15 },
+            { x: 70, y: -20 },
+            { x: 138, y: -20 },
+            { x: 138, y: 0 },
+            { x: 158, y: 0 },
+          ],
+        },
+      ],
+      [null],
+    );
+    expect(route.points).toEqual([
+      { x: 50, y: 15 },
+      { x: 104, y: 15 },
+      { x: 104, y: 0 },
+      { x: 158, y: 0 },
+    ]);
   });
 
   it("keeps tight spaces orthogonal when full-length approaches cannot fit", () => {

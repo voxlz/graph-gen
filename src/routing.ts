@@ -41,6 +41,7 @@ export interface RouteEdge {
 export interface RouteGroup {
   rect: Box;
   members: Set<number>;
+  label?: Box;
 }
 
 export interface RouteInput {
@@ -256,6 +257,7 @@ function obstaclesFor(input: RouteInput, edge: RouteEdge): Box[] {
     }
   });
   for (const group of input.groups) {
+    if (group.label) boxes.push(expand(group.label, input.clearance / 2));
     if (!group.members.has(edge.source) && !group.members.has(edge.target)) {
       boxes.push(expand(group.rect, input.clearance / 2));
     }
@@ -457,6 +459,21 @@ const ORTHOGONAL_LABEL_TURN_GAP = 10;
 const ORTHOGONAL_MIN_SECTION = 20;
 const ORTHOGONAL_ALIGNMENT_TOLERANCE = 0.5;
 
+function followsGroupBorder(a: Pt, b: Pt, groups: RouteGroup[]): boolean {
+  const horizontal = Math.abs(a.y - b.y) < EPS;
+  return groups.some(({ rect }) =>
+    horizontal
+      ? Math.max(a.x, b.x) > rect.minX + EPS &&
+        Math.min(a.x, b.x) < rect.maxX - EPS &&
+        Math.min(Math.abs(a.y - rect.minY), Math.abs(a.y - rect.maxY)) <
+          ORTHOGONAL_GAP - EPS
+      : Math.max(a.y, b.y) > rect.minY + EPS &&
+        Math.min(a.y, b.y) < rect.maxY - EPS &&
+        Math.min(Math.abs(a.x - rect.minX), Math.abs(a.x - rect.maxX)) <
+          ORTHOGONAL_GAP - EPS,
+  );
+}
+
 class MinHeap {
   private keys: number[] = [];
   private values: number[] = [];
@@ -617,6 +634,32 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
     xs.push(box.minX - clearance / 2, box.maxX + clearance / 2);
     ys.push(box.minY - clearance / 2, box.maxY + clearance / 2);
   }
+  for (const group of groups) {
+    const box = group.rect;
+    xs.push(
+      box.minX - ORTHOGONAL_GAP,
+      box.minX + ORTHOGONAL_GAP,
+      box.maxX - ORTHOGONAL_GAP,
+      box.maxX + ORTHOGONAL_GAP,
+    );
+    ys.push(
+      box.minY - ORTHOGONAL_GAP,
+      box.minY + ORTHOGONAL_GAP,
+      box.maxY - ORTHOGONAL_GAP,
+      box.maxY + ORTHOGONAL_GAP,
+    );
+    if (group.label) {
+      const label = expand(
+        group.label,
+        Math.max(clearance / 2, ORTHOGONAL_LABEL_TURN_GAP),
+      );
+      xs.push(label.minX, label.maxX);
+      ys.push(label.minY, label.maxY);
+    }
+  }
+  const groupLabels = groups.flatMap((group) =>
+    group.label ? [expand(group.label, clearance / 2)] : [],
+  );
   const labelBoxes = edges.map((edge) =>
     edge.via
       ? expand(
@@ -691,6 +734,28 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
   const centers = nodes.map(
     (node) => gy.indexOf(node.y) * nx + gx.indexOf(node.x),
   );
+  const groupTurnBoxes = groups.flatMap((group) =>
+    group.label ? [expand(group.label, ORTHOGONAL_LABEL_TURN_GAP)] : [],
+  );
+  const turnBoxes = [
+    ...groupTurnBoxes,
+    ...labelTurnBoxes.filter((box): box is Box => box !== null),
+  ];
+  const turnBlocked = new Uint8Array(total);
+  const hBlocked = new Uint8Array(total);
+  const vBlocked = new Uint8Array(total);
+  const forbidden = (a: Pt, b: Pt) =>
+    followsGroupBorder(a, b, groups) ||
+    groupLabels.some((label) => segmentHitsBox(a, b, label));
+  for (let i = 0; i < total; i++) {
+    const point = pointOf(i);
+    turnBlocked[i] = Number(
+      turnBoxes.some((box) => strictlyInside(point, box)),
+    );
+    if (i % nx < nx - 1) hBlocked[i] = Number(forbidden(point, pointOf(i + 1)));
+    if (Math.floor(i / nx) < ny - 1)
+      vBlocked[i] = Number(forbidden(point, pointOf(i + nx)));
+  }
 
   const hUsage = new Float64Array(total);
   const vUsage = new Float64Array(total);
@@ -780,6 +845,11 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
       for (const [next, nextDir, info, segment] of moves) {
         if (dir !== 4 && (dir ^ 1) === nextDir) continue;
         if (blocked(info) || blocked(pointInfo[next])) continue;
+        if (
+          (nextDir < 2 ? hBlocked[segment] : vBlocked[segment]) ||
+          (dir !== 4 && dir !== nextDir && turnBlocked[i])
+        )
+          continue;
         const free = local(i) && local(next);
         const p = pointOf(i);
         const q = pointOf(next);
@@ -790,10 +860,7 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
           (ownLabel &&
             via &&
             segmentHitsBox(p, q, ownLabel) &&
-            !onCenterAxis(p, q, via)) ||
-          (dir !== 4 &&
-            dir !== nextDir &&
-            labelTurnBoxes.some((box) => box && strictlyInside(p, box)))
+            !onCenterAxis(p, q, via))
         ) {
           continue;
         }
@@ -1025,11 +1092,26 @@ function bendCount(points: Pt[]): number {
   return Math.max(0, simplify(points).length - 2);
 }
 
-// Prefer clear, separated routes with full straight sections, then fewer
-// bends and shorter, balanced approaches to the endpoints.
+function hasImmediateReversal(points: Pt[]): boolean {
+  return points.slice(1, -1).some((point, index) => {
+    const before = points[index];
+    const after = points[index + 2];
+    const cross =
+      (point.x - before.x) * (after.y - point.y) -
+      (point.y - before.y) * (after.x - point.x);
+    const dot =
+      (point.x - before.x) * (after.x - point.x) +
+      (point.y - before.y) * (after.y - point.y);
+    return Math.abs(cross) < EPS && dot < -EPS;
+  });
+}
+
+// Prefer clear, separated routes with long endpoint approaches. Once labels
+// are placed, prefer fewer bends over full-length interior sections.
 function preferSimpleRoutes(
   input: RouteInput,
   routes: EdgeRoute[],
+  preferFewerBends = false,
 ): EdgeRoute[] {
   const { nodes, edges } = input;
   const obstacles = edges.map((edge) => obstaclesFor(input, edge));
@@ -1042,6 +1124,11 @@ function preferSimpleRoutes(
           ),
         ]
       : [],
+  );
+  labelTurnBoxes.push(
+    ...input.groups.flatMap((group) =>
+      group.label ? [expand(group.label, ORTHOGONAL_LABEL_TURN_GAP)] : [],
+    ),
   );
   const rank = (index: number, points: Pt[]) => {
     const bounds = polylineBounds(points);
@@ -1080,9 +1167,24 @@ function preferSimpleRoutes(
       crossings,
       Math.max(0, minimum - lengths[0]) +
         Math.max(0, minimum - lengths[lengths.length - 1]),
-      lengths.reduce((sum, length) => sum + Math.max(0, minimum - length), 0),
+      ...(preferFewerBends
+        ? [
+            Number(crowding > EPS),
+            bendCount(points),
+            lengths.reduce(
+              (sum, length) => sum + Math.max(0, minimum - length),
+              0,
+            ),
+          ]
+        : [
+            lengths.reduce(
+              (sum, length) => sum + Math.max(0, minimum - length),
+              0,
+            ),
+            Number(crowding > EPS),
+            bendCount(points),
+          ]),
       crowding,
-      bendCount(points),
       polylineLength(points),
       Math.abs(lengths[0] - lengths[lengths.length - 1]),
     ];
@@ -1098,7 +1200,6 @@ function preferSimpleRoutes(
     edges.forEach((edge, index) => {
       const s = nodes[edge.source];
       const t = nodes[edge.target];
-      if (edge.via) return;
       // Route branches around a clear straight connection, not vice versa.
       if (
         routes[index].points.length === 2 &&
@@ -1113,9 +1214,57 @@ function preferSimpleRoutes(
         return;
       }
       let bestRank = rank(index, routes[index].points);
-      for (const shape of simpleOrthogonalShapes(s, t)) {
+      const shapes = simpleOrthogonalShapes(s, t);
+      if (edge.via) {
+        shapes.push(
+          [s, { x: s.x, y: edge.via.y }, { x: t.x, y: edge.via.y }, t],
+          [s, { x: edge.via.x, y: s.y }, { x: edge.via.x, y: t.y }, t],
+        );
+      }
+      // Remove doglegs locally as well as trying whole-route replacements.
+      const original = routes[index].points;
+      for (let first = 0; first < original.length - 2; first++) {
+        for (let last = first + 2; last < original.length; last++) {
+          const a = original[first];
+          const b = original[last];
+          for (const corner of [
+            { x: a.x, y: b.y },
+            { x: b.x, y: a.y },
+          ]) {
+            shapes.push([
+              ...original.slice(0, first + 1),
+              corner,
+              ...original.slice(last),
+            ]);
+          }
+        }
+      }
+      for (const shape of shapes) {
         const points = simplify(clipToBorders(shape, nodeBox(s), nodeBox(t)));
-        if (points.length < 2) continue;
+        if (points.length < 2 || hasImmediateReversal(points)) continue;
+        if (
+          edge.via &&
+          !routeTouchesLabel(
+            { points },
+            edge.via,
+            edge.labelWidth ?? 0,
+            edge.labelHeight ?? 0,
+          )
+        )
+          continue;
+        if (
+          polylineHitsBox(points, nodeBox(s)) ||
+          polylineHitsBox(points, nodeBox(t))
+        )
+          continue;
+        if (
+          points
+            .slice(1)
+            .some((point, i) =>
+              followsGroupBorder(points[i], point, input.groups),
+            )
+        )
+          continue;
         if (
           points
             .slice(1, -1)
@@ -1255,8 +1404,8 @@ function labelBox(spot: Pt, width: number, height: number): Box {
 // Labels touch their own edge when they can (centred on it if possible) and
 // keep clear of nodes, other labels and other edges. A label may always
 // overlap its own edge, but keeps LABEL_NODE_CLEARANCE from every node so
-// arrowheads stay visible. Edges routed through a label node (`via`) keep
-// their label there.
+// arrowheads stay visible. Labels stay at their label nodes (`via`) unless an
+// orthogonal route cannot reach one; then a free on-route slot is preferred.
 export function placeRouteLabels(
   input: RouteInput,
   routes: EdgeRoute[],
@@ -1270,6 +1419,9 @@ export function placeRouteLabels(
     edge.via
       ? [labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0)]
       : [],
+  );
+  placed.push(
+    ...input.groups.flatMap((group) => (group.label ? [group.label] : [])),
   );
   const routeBounds = routes.map((route) => polylineBounds(route.points));
   const bends =
@@ -1289,8 +1441,22 @@ export function placeRouteLabels(
     const width = edge.labelWidth ?? 0;
     const height = edge.labelHeight ?? 0;
     if (!width || !height) return null;
-    if (edge.via) {
-      return { ...edge.via, anchorX: edge.via.x, anchorY: edge.via.y };
+    if (
+      edge.via &&
+      (mode !== "orthogonal" ||
+        routeTouchesLabel(routes[index], edge.via, width, height))
+    ) {
+      const box = labelBox(edge.via, width, height);
+      return {
+        ...edge.via,
+        anchorX: edge.via.x,
+        anchorY: edge.via.y,
+        ...(input.groups.some(
+          (group) => group.label && boxesOverlap(box, group.label),
+        )
+          ? { blocked: true }
+          : {}),
+      };
     }
     const route = routes[index];
     let best: { spot: LabelSpot; box: Box; rank: number[] } | null = null;
@@ -1550,6 +1716,12 @@ export function bendOrthogonalToLabels(
       const points = simplify(clipToBorders(shape, nodeBox(s), nodeBox(t)));
       if (
         points.length < 2 ||
+        hasImmediateReversal(points) ||
+        points
+          .slice(1)
+          .some((point, i) =>
+            followsGroupBorder(points[i], point, input.groups),
+          ) ||
         !routeTouchesLabel(
           { points },
           spot,
@@ -1576,12 +1748,21 @@ export function bendOrthogonalToLabels(
       if (
         points
           .slice(1, -1)
-          .some((p) =>
-            boxes.some(
-              (label) =>
-                label &&
-                strictlyInside(p, expand(label, ORTHOGONAL_LABEL_TURN_GAP)),
-            ),
+          .some(
+            (p) =>
+              input.groups.some(
+                (group) =>
+                  group.label &&
+                  strictlyInside(
+                    p,
+                    expand(group.label, ORTHOGONAL_LABEL_TURN_GAP),
+                  ),
+              ) ||
+              boxes.some(
+                (label) =>
+                  label &&
+                  strictlyInside(p, expand(label, ORTHOGONAL_LABEL_TURN_GAP)),
+              ),
           )
       )
         continue;
@@ -1594,7 +1775,17 @@ export function bendOrthogonalToLabels(
     }
     if (best) result[index] = { points: best };
   });
-  return result;
+  return preferSimpleRoutes(
+    {
+      ...input,
+      edges: input.edges.map((edge, index) => ({
+        ...edge,
+        via: spots[index] ?? edge.via,
+      })),
+    },
+    result,
+    true,
+  );
 }
 
 // Indices of routes passing through a node or boundary they must avoid.

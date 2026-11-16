@@ -30,6 +30,171 @@ describe("wrapLabel", () => {
 });
 
 describe("renderGraph", () => {
+  it("keeps the Weather API to Redis route simple without backtracking", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graphgen-weather-scope-"),
+    );
+    const dumpPath = path.join(directory, "dump.json");
+    try {
+      execFileSync(
+        path.join(__dirname, "../node_modules/.bin/tsx"),
+        [
+          path.join(__dirname, "../src/index.ts"),
+          path.join(__dirname, "../demo/scopes/weather_scope.ggn"),
+          path.join(directory, "render"),
+        ],
+        {
+          env: {
+            ...process.env,
+            GRAPHGEN_LAYOUT: "orthogonal",
+            GRAPHGEN_LABEL_NODES: "auto",
+            GRAPHGEN_DUMP: dumpPath,
+          },
+          stdio: "pipe",
+        },
+      );
+      const dump: {
+        nodes: Array<{
+          id: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        }>;
+        edges: Array<{
+          source: string;
+          target: string;
+          points: Array<{ x: number; y: number }>;
+        }>;
+      } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+      const edge = dump.edges.find(
+        (item) => item.source === "api" && item.target === "cache",
+      )!;
+      expect(edge).toBeDefined();
+      expect(edge.points.length - 2).toBeLessThanOrEqual(2);
+      for (let i = 1; i < edge.points.length - 1; i++) {
+        const a = edge.points[i - 1],
+          b = edge.points[i],
+          c = edge.points[i + 1];
+        const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y);
+        expect(Math.abs(cross) < 1e-6 && dot < -1e-6).toBe(false);
+      }
+      for (const node of dump.nodes.filter(
+        (item) => item.id !== "api" && item.id !== "cache",
+      )) {
+        const box = {
+          minX: node.x - node.width / 2,
+          maxX: node.x + node.width / 2,
+          minY: node.y - node.height / 2,
+          maxY: node.y + node.height / 2,
+        };
+        expect(
+          edge.points
+            .slice(1)
+            .some((point, i) => segmentHitsBox(edge.points[i], point, box)),
+        ).toBe(false);
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it.each(["curved", "orthogonal", "constraint", "force", "cola"])(
+    "keeps group titles clear of nodes, edges and labels in %s mode",
+    async (layout) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "graphgen-group-labels-"),
+      );
+      const previousLayout = process.env.GRAPHGEN_LAYOUT;
+      const previousDump = process.env.GRAPHGEN_DUMP;
+      process.env.GRAPHGEN_LAYOUT = layout;
+      process.env.GRAPHGEN_DUMP = path.join(directory, "dump.json");
+      try {
+        const spec = emptyGraphSpec();
+        spec.graph.boundaryPad = 0;
+        spec.graph.labelBand = 0;
+        spec.graph.nestPad = 0;
+        spec.boundaries = [
+          {
+            id: "outer",
+            label: "Outer group with a long title\nand a second line",
+            parent: null,
+          },
+          {
+            id: "inner",
+            label: "Inner group with another long title",
+            parent: "outer",
+          },
+          { id: "hidden", label: "Not drawn", parent: null, draw: false },
+        ];
+        spec.nodes = [
+          { id: "source", label: "Source", shape: "box", parent: null },
+          { id: "target", label: "Target", shape: "box", parent: "inner" },
+          { id: "peer", label: "Peer", shape: "box", parent: "inner" },
+          {
+            id: "hidden-node",
+            label: "Hidden group member",
+            shape: "box",
+            parent: "hidden",
+          },
+        ];
+        spec.edges = [{ source: "source", target: "target", label: "Request" }];
+        await renderGraph(spec, path.join(directory, "render"));
+        type Box = { minX: number; maxX: number; minY: number; maxY: number };
+        const dump: {
+          nodes: Array<{ x: number; y: number; width: number; height: number }>;
+          groups: Array<{ id: string; rect: Box; label: Box | null }>;
+          edges: Array<{ points: Array<{ x: number; y: number }> }>;
+          labels: Box[];
+        } = JSON.parse(fs.readFileSync(process.env.GRAPHGEN_DUMP, "utf8"));
+        const titles = dump.groups.flatMap((group) =>
+          group.label ? [group.label] : [],
+        );
+        expect(titles).toHaveLength(2);
+        expect(
+          dump.groups.find((group) => group.id === "hidden")!.label,
+        ).toBeNull();
+        const overlaps = (a: Box, b: Box) =>
+          a.minX < b.maxX &&
+          a.maxX > b.minX &&
+          a.minY < b.maxY &&
+          a.maxY > b.minY;
+        for (const [index, title] of titles.entries()) {
+          for (const other of [...titles.slice(index + 1), ...dump.labels]) {
+            expect(overlaps(title, other)).toBe(false);
+          }
+          for (const node of dump.nodes) {
+            expect(
+              overlaps(title, {
+                minX: node.x - node.width / 2,
+                maxX: node.x + node.width / 2,
+                minY: node.y - node.height / 2,
+                maxY: node.y + node.height / 2,
+              }),
+            ).toBe(false);
+          }
+          for (const edge of dump.edges) {
+            expect(
+              edge.points
+                .slice(1)
+                .some((point, i) =>
+                  segmentHitsBox(edge.points[i], point, title),
+                ),
+            ).toBe(false);
+          }
+        }
+      } finally {
+        if (previousLayout === undefined) delete process.env.GRAPHGEN_LAYOUT;
+        else process.env.GRAPHGEN_LAYOUT = previousLayout;
+        if (previousDump === undefined) delete process.env.GRAPHGEN_DUMP;
+        else process.env.GRAPHGEN_DUMP = previousDump;
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+
   it("writes a PNG for an empty graph", async () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "graphgen-render-"),
@@ -119,7 +284,15 @@ describe("renderGraph", () => {
             "utf8",
           ),
         );
-        await renderGraph(spec, path.join(directory, `${name}.png`));
+        execFileSync(
+          path.join(__dirname, "../node_modules/.bin/tsx"),
+          [
+            path.join(__dirname, "../src/index.ts"),
+            path.join(__dirname, `../demo/showcase/${name}.ggn`),
+            path.join(directory, `${name}.png`),
+          ],
+          { env: process.env, stdio: "pipe" },
+        );
         const dump: {
           edges: Array<{
             source: string;
@@ -344,7 +517,7 @@ describe("renderGraph", () => {
       const size = output.match(/\((\d+)x(\d+)\)/);
       expect(size).not.toBeNull();
       expect(Number(size![1])).toBeLessThanOrEqual(1200);
-      expect(Number(size![1]) * Number(size![2])).toBeLessThan(760000);
+      expect(Number(size![1]) * Number(size![2])).toBeLessThan(900000);
       const dump: {
         nodes: Array<{
           id: string;

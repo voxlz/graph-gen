@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { createCanvas } from "canvas";
 import {
+  boundaryLabelBox,
   directionalSlack,
   solveLayout,
   type LayoutEdge,
   type LayoutNode,
   type LayoutOptions,
 } from "../src/layout";
+import { segmentHitsBox } from "../src/routing";
 import { parseGraphText } from "../src/parse";
 import { prepareEdges } from "../src/render";
 import { angularRelaxationScore } from "../src/strategies/angular-relaxation";
@@ -22,6 +24,35 @@ const options = {
 };
 const measureContext = createCanvas(10, 10).getContext("2d");
 measureContext.font = "14px sans-serif";
+
+it.each([false, true])(
+  "repairs straight edges crossing a group title (title-only repair: %s)",
+  (groupLabelsOnly) => {
+    const nodes = [
+      { ...node("source", 60, 60), x: 0, y: -200 },
+      { ...node("target", 60, 60, "group"), x: 0, y: 0 },
+      { ...node("peer", 60, 60, "group"), x: 200, y: 0 },
+    ];
+    const boundary = { id: "group", labelWidth: 180, labelHeight: 16 };
+    const initialLabel = { minX: -39, maxX: 145, minY: -51, maxY: -31 };
+    expect(segmentHitsBox(nodes[0], nodes[1], initialLabel)).toBe(true);
+    const result = solveLayout(
+      nodes,
+      [boundary],
+      [{ source: 0, target: 1 }],
+      [],
+      {
+        ...options,
+        preserveInitialPositions: true,
+        minimizeIterations: 0,
+        groupLabelsOnly,
+      },
+    );
+    expect(result.violations).toEqual([]);
+    const label = boundaryLabelBox(boundary, result.groups.get("group")!)!;
+    expect(segmentHitsBox(nodes[0], nodes[1], label)).toBe(false);
+  },
+);
 
 function textWidth(text: string): number {
   return measureContext.measureText(text).width;
