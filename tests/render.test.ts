@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { emptyGraphSpec } from "../src/parse";
+import { execFileSync } from "node:child_process";
+import { segmentHitsBox } from "../src/routing";
+import { emptyGraphSpec, parseGraphText } from "../src/parse";
 import {
   formatEdgeLabel,
   prepareEdges,
@@ -97,6 +99,416 @@ describe("renderGraph", () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(["compass", "example"])(
+    "keeps orthogonal bends visible and clear connections straight: %s",
+    async (name) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "graphgen-orthogonal-"),
+      );
+
+      const dumpPath = path.join(directory, "dump.json");
+      const previousLayout = process.env.GRAPHGEN_LAYOUT;
+      const previousDump = process.env.GRAPHGEN_DUMP;
+      process.env.GRAPHGEN_LAYOUT = "orthogonal";
+      process.env.GRAPHGEN_DUMP = dumpPath;
+      try {
+        const { spec } = parseGraphText(
+          fs.readFileSync(
+            path.join(__dirname, `../demo/showcase/${name}.ggn`),
+            "utf8",
+          ),
+        );
+        await renderGraph(spec, path.join(directory, `${name}.png`));
+        const dump: {
+          edges: Array<{
+            source: string;
+            target: string;
+            points: Array<{ x: number; y: number }>;
+          }>;
+          labels: Array<{
+            minX: number;
+            minY: number;
+            maxX: number;
+            maxY: number;
+          }>;
+        } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+        if (name === "compass") {
+          const edge = dump.edges.find(
+            (edge) => edge.source === "center" && edge.target === "s",
+          );
+          expect(edge).toBeDefined();
+          expect(edge!.points).toHaveLength(2);
+          expect(edge!.points[0].x).toBeCloseTo(edge!.points[1].x);
+        }
+        expect(dump.labels).toHaveLength(
+          spec.edges.filter((edge) => edge.label).length,
+        );
+        for (const label of dump.labels) {
+          for (const edge of dump.edges) {
+            for (const bend of edge.points.slice(1, -1)) {
+              expect(
+                bend.x > label.minX &&
+                  bend.x < label.maxX &&
+                  bend.y > label.minY &&
+                  bend.y < label.maxY,
+              ).toBe(false);
+            }
+          }
+        }
+      } finally {
+        for (const [key, value] of [
+          ["GRAPHGEN_LAYOUT", previousLayout],
+          ["GRAPHGEN_DUMP", previousDump],
+        ] as const) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+
+  it("compacts bookstore providers while keeping orthogonal labels and routes clear", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graphgen-bookstore-"),
+    );
+    const dumpPath = path.join(directory, "dump.json");
+    try {
+      const output = execFileSync(
+        path.join(__dirname, "../node_modules/.bin/tsx"),
+        [
+          path.join(__dirname, "../src/index.ts"),
+          path.join(__dirname, "../demo/usecases/bookstore_uc2.ggn"),
+          path.join(directory, "render"),
+        ],
+        {
+          env: {
+            ...process.env,
+            GRAPHGEN_LAYOUT: "orthogonal",
+            GRAPHGEN_LABEL_NODES: "auto",
+            GRAPHGEN_DUMP: dumpPath,
+          },
+          encoding: "utf8",
+          stdio: "pipe",
+        },
+      );
+      const size = output.match(/\((\d+)x(\d+)\)/);
+      expect(size).not.toBeNull();
+      expect(Number(size![1])).toBeLessThanOrEqual(900);
+      expect(Number(size![1]) * Number(size![2])).toBeLessThan(1100000);
+      const dump: {
+        nodes: Array<{
+          id: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        }>;
+        groups: Array<{
+          id: string;
+          rect: { minX: number; maxX: number };
+        }>;
+        edges: Array<{
+          source: string;
+          target: string;
+          points: Array<{ x: number; y: number }>;
+        }>;
+        labels: Array<{
+          source: string;
+          target: string;
+          minX: number;
+          minY: number;
+          maxX: number;
+          maxY: number;
+        }>;
+      } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+      const external = dump.groups.find((group) => group.id === "external")!;
+      expect(external.rect.maxX - external.rect.minX).toBeLessThanOrEqual(380);
+      for (let i = 0; i < dump.nodes.length; i++) {
+        for (let j = i + 1; j < dump.nodes.length; j++) {
+          const a = dump.nodes[i];
+          const b = dump.nodes[j];
+          expect(
+            Math.abs(a.x - b.x) >= (a.width + b.width) / 2 + 100 - 0.01 ||
+              Math.abs(a.y - b.y) >= (a.height + b.height) / 2 + 100 - 0.01,
+          ).toBe(true);
+        }
+      }
+      for (const route of dump.edges) {
+        for (const node of dump.nodes) {
+          if (node.id === route.source || node.id === route.target) continue;
+          const box = {
+            minX: node.x - node.width / 2,
+            maxX: node.x + node.width / 2,
+            minY: node.y - node.height / 2,
+            maxY: node.y + node.height / 2,
+          };
+          expect(
+            route.points
+              .slice(1)
+              .some((point, i) => segmentHitsBox(route.points[i], point, box)),
+          ).toBe(false);
+        }
+      }
+      for (const item of dump.labels) {
+        for (const route of dump.edges) {
+          for (const bend of route.points.slice(1, -1)) {
+            expect(
+              bend.x > item.minX - 10 + 1e-6 &&
+                bend.x < item.maxX + 10 - 1e-6 &&
+                bend.y > item.minY - 10 + 1e-6 &&
+                bend.y < item.maxY + 10 - 1e-6,
+            ).toBe(false);
+          }
+        }
+        const route = dump.edges.find(
+          (edge) => edge.source === item.source && edge.target === item.target,
+        )!;
+        const dx = Math.min(
+          (item.maxX - item.minX) / 4,
+          Math.max(2, (item.maxX - item.minX) / 2 - 24),
+        );
+        const dy = Math.min(
+          (item.maxY - item.minY) / 4,
+          Math.max(2, (item.maxY - item.minY) / 2 - 24),
+        );
+        const core = {
+          minX: item.minX + dx,
+          maxX: item.maxX - dx,
+          minY: item.minY + dy,
+          maxY: item.maxY - dy,
+        };
+        expect(
+          route.points
+            .slice(1)
+            .some((point, i) => segmentHitsBox(route.points[i], point, core)),
+        ).toBe(true);
+      }
+      const edge = dump.edges.find(
+        (item) => item.source === "orders" && item.target === "postgres",
+      )!;
+      const label = dump.labels.find(
+        (item) => item.source === "orders" && item.target === "postgres",
+      )!;
+      expect(edge).toBeDefined();
+      expect(label).toBeDefined();
+      const core = {
+        minX: (label.minX * 3 + label.maxX) / 4,
+        maxX: (label.minX + label.maxX * 3) / 4,
+        minY: (label.minY * 3 + label.maxY) / 4,
+        maxY: (label.minY + label.maxY * 3) / 4,
+      };
+      expect(
+        edge.points
+          .slice(1)
+          .some((point, i) => segmentHitsBox(edge.points[i], point, core)),
+      ).toBe(true);
+      for (const point of edge.points.slice(1, -1)) {
+        expect(
+          point.x > label.minX &&
+            point.x < label.maxX &&
+            point.y > label.minY &&
+            point.y < label.maxY,
+        ).toBe(false);
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it("compacts disconnected weather nodes with automatic label nodes", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graphgen-weather-"),
+    );
+    const dumpPath = path.join(directory, "dump.json");
+    try {
+      const output = execFileSync(
+        path.join(__dirname, "../node_modules/.bin/tsx"),
+        [
+          path.join(__dirname, "../src/index.ts"),
+          path.join(__dirname, "../demo/usecases/weather_uc1.ggn"),
+          path.join(directory, "render"),
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GRAPHGEN_LAYOUT: "orthogonal",
+            GRAPHGEN_LABEL_NODES: "auto",
+            GRAPHGEN_DUMP: dumpPath,
+          },
+        },
+      );
+      const size = output.match(/\((\d+)x(\d+)\)/);
+      expect(size).not.toBeNull();
+      expect(Number(size![1])).toBeLessThanOrEqual(1200);
+      expect(Number(size![1]) * Number(size![2])).toBeLessThan(760000);
+      const dump: {
+        nodes: Array<{
+          id: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        }>;
+        edges: Array<{
+          source: string;
+          target: string;
+          points: Array<{ x: number; y: number }>;
+        }>;
+        labels: Array<{
+          source: string;
+          target: string;
+          minX: number;
+          minY: number;
+          maxX: number;
+          maxY: number;
+        }>;
+      } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+      for (let i = 0; i < dump.nodes.length; i++) {
+        for (let j = i + 1; j < dump.nodes.length; j++) {
+          const a = dump.nodes[i];
+          const b = dump.nodes[j];
+          expect(
+            Math.abs(a.x - b.x) >= (a.width + b.width) / 2 + 150 - 0.01 ||
+              Math.abs(a.y - b.y) >= (a.height + b.height) / 2 + 150 - 0.01,
+          ).toBe(true);
+        }
+      }
+      for (const label of dump.labels) {
+        for (const node of dump.nodes) {
+          expect(
+            label.maxX <= node.x - node.width / 2 - 16 ||
+              label.minX >= node.x + node.width / 2 + 16 ||
+              label.maxY <= node.y - node.height / 2 - 16 ||
+              label.minY >= node.y + node.height / 2 + 16,
+          ).toBe(true);
+        }
+        for (const other of dump.edges) {
+          for (const bend of other.points.slice(1, -1)) {
+            expect(
+              bend.x > label.minX - 10 + 1e-6 &&
+                bend.x < label.maxX + 10 - 1e-6 &&
+                bend.y > label.minY - 10 + 1e-6 &&
+                bend.y < label.maxY + 10 - 1e-6,
+            ).toBe(false);
+          }
+        }
+        const edge = dump.edges.find(
+          (item) =>
+            item.source === label.source && item.target === label.target,
+        )!;
+        expect(edge).toBeDefined();
+        const inset = (half: number) =>
+          Math.min(half / 2, Math.max(2, half - 24));
+        const dx = inset((label.maxX - label.minX) / 2);
+        const dy = inset((label.maxY - label.minY) / 2);
+        const core = {
+          minX: label.minX + dx,
+          maxX: label.maxX - dx,
+          minY: label.minY + dy,
+          maxY: label.maxY - dy,
+        };
+        expect(
+          edge.points
+            .slice(1)
+            .some((p, i) => segmentHitsBox(edge.points[i], p, core)),
+        ).toBe(true);
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it.each(["auto", "true", "false"])(
+    "respects the orthogonal label-node setting (%s)",
+    async (setting) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "graphgen-label-node-"),
+      );
+      const dumpPath = path.join(directory, "dump.json");
+      const previous = {
+        layout: process.env.GRAPHGEN_LAYOUT,
+        labelNodes: process.env.GRAPHGEN_LABEL_NODES,
+        dump: process.env.GRAPHGEN_DUMP,
+      };
+      process.env.GRAPHGEN_LAYOUT = "orthogonal";
+      process.env.GRAPHGEN_LABEL_NODES = setting;
+      process.env.GRAPHGEN_DUMP = dumpPath;
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const spec = emptyGraphSpec();
+        spec.graph.labelMaxWidth = 0;
+        spec.nodes = [
+          { id: "a", label: "A", shape: "box", parent: null },
+          { id: "b", label: "B", shape: "box", parent: null },
+        ];
+        spec.edges = [
+          {
+            source: "a",
+            target: "b",
+            label:
+              "a really long label that should force a label node to push the two endpoints apart and produce a direct orthogonal route",
+          },
+        ];
+        await renderGraph(spec, path.join(directory, "render"));
+        const dump: {
+          edges: Array<{ points: Array<{ x: number; y: number }> }>;
+          labels: Array<{
+            minX: number;
+            minY: number;
+            maxX: number;
+            maxY: number;
+          }>;
+        } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+        const points = dump.edges[0].points;
+        const label = dump.labels[0];
+        const core = {
+          minX: (label.minX * 3 + label.maxX) / 4,
+          maxX: (label.minX + label.maxX * 3) / 4,
+          minY: (label.minY * 3 + label.maxY) / 4,
+          maxY: (label.minY + label.maxY * 3) / 4,
+        };
+        expect(
+          points.slice(1).some((p, i) => segmentHitsBox(points[i], p, core)),
+        ).toBe(setting !== "false");
+        if (setting === "false") {
+          expect(warn).toHaveBeenCalledWith(
+            "[orthogonal] could not route a -> b through its label",
+          );
+        } else {
+          expect(warn).not.toHaveBeenCalled();
+        }
+        for (const point of points.slice(1, -1)) {
+          expect(
+            point.x > label.minX &&
+              point.x < label.maxX &&
+              point.y > label.minY &&
+              point.y < label.maxY,
+          ).toBe(false);
+        }
+        for (let i = 1; i < points.length; i++) {
+          expect(
+            points[i].x === points[i - 1].x || points[i].y === points[i - 1].y,
+          ).toBe(true);
+        }
+      } finally {
+        warn.mockRestore();
+        for (const [key, value] of [
+          ["GRAPHGEN_LAYOUT", previous.layout],
+          ["GRAPHGEN_LABEL_NODES", previous.labelNodes],
+          ["GRAPHGEN_DUMP", previous.dump],
+        ] as const) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    60000,
+  );
 
   it("formats graph edge labels with their index and parsed edge data", () => {
     const edge = {

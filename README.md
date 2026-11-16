@@ -276,7 +276,10 @@ arrowheads stay visible), other labels and other edges.
 
 With `curved`, a label that can't fit beside its edge stays where there is room
 and the edge bends to reach it, as long as the bend clears nodes, boundaries and
-other labels. Labels that still can't touch their edge become label nodes and
+other labels. With `orthogonal`, the edge similarly reroutes through the label
+when a clear route is available without adding crossings or hiding bends.
+
+With either engine, labels that still can't touch their edge become label nodes and
 the graph is laid out again: each such label pushes other nodes away and its
 edge is routed through it. This repeats until every label touches its edge. Control this with `labelNodes` in the
 `graph { ... }` block (or `GRAPHGEN_LABEL_NODES`):
@@ -284,6 +287,9 @@ edge is routed through it. This repeats until every label touches its edge. Cont
 - `auto` (default): only for labels that can't touch their edge otherwise.
 - `true`: always. Every label sits on its edge, at the cost of larger layouts.
 - `false`: never.
+
+If an orthogonal edge still cannot reach its label, the renderer warns and keeps
+the original edge and detached label.
 
 ## Reuse graph with new edges
 
@@ -328,7 +334,13 @@ Set `graph.layout` to choose how nodes are positioned:
   placed beside their edge. Several starting layouts (WebCola variants and a
   grid) are compacted and the most compact routed result is kept.
 - `orthogonal` — like `curved`, but edges are horizontal and vertical segments
-  joined by as few 90° bends as possible.
+  joined by as few 90° bends as possible, connecting at the centre of each
+  node's side. Parallel runs aim to stay at least 6 px apart, except for short
+  shared attachment stubs. Routes favour straight sections of at least 20 px
+  (including beside arrowheads) and balanced bends where obstacles allow.
+  Subpixel alignment differences below 0.5 px do not introduce bends; straight
+  connections stay within 0.25 px of the side centres. Labels keep a 10 px
+  no-turn margin around their padded chips, so edge direction remains visible.
 - `constraint` — straight edges that never cross each other, nodes, or labels.
   It solves from both a grid and a WebCola starting layout and keeps the more
   compact result.

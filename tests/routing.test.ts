@@ -1,8 +1,10 @@
 import {
   bendToLabels,
+  bendOrthogonalToLabels,
   placeRouteLabels,
   routeCurved,
   routeOrthogonal,
+  routeTouchesLabel,
   segmentHitsBox,
   type RouteInput,
 } from "../src/routing";
@@ -180,9 +182,348 @@ describe("placeRouteLabels", () => {
       ).toBe(true);
     }
   });
+
+  it("keeps orthogonal bends visible without changing curved label placement", () => {
+    const input: RouteInput = {
+      nodes: [nodes[0], { x: 200, y: 180, width: 100, height: 60 }],
+      edges: [{ source: 0, target: 1, labelWidth: 80, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = [
+      {
+        points: [
+          { x: 50, y: 0 },
+          { x: 200, y: 0 },
+          { x: 200, y: 150 },
+        ],
+      },
+    ];
+    const legacy = placeRouteLabels(input, routes);
+    expect(legacy[0]).toMatchObject({ x: 200, y: 0 });
+    expect(placeRouteLabels(input, routes, "curved")).toEqual(legacy);
+    const [spot] = placeRouteLabels(input, routes, "orthogonal");
+    expect(spot!.blocked).toBeUndefined();
+    expect(spot!.detached).toBeUndefined();
+    // Include the label padding and breathing room around the corner.
+    const hidesBend =
+      Math.abs(spot!.x - 200) < 40 + 4 + 10 && Math.abs(spot!.y) < 8 + 2 + 10;
+    expect(hidesBend).toBe(false);
+  });
 });
 
 describe("routeOrthogonal", () => {
+  it("keeps aligned endpoints straight through an off-center label node", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 0, y: 400, width: 100, height: 60 },
+      ],
+      edges: [
+        {
+          source: 0,
+          target: 1,
+          via: { x: 4, y: 200 },
+          labelWidth: 100,
+          labelHeight: 20,
+        },
+      ],
+      groups: [],
+      clearance: 8,
+    };
+    const [route] = routeOrthogonal(input);
+    expect(route.points).toHaveLength(2);
+    expect(route.points.every((point) => point.x === 0)).toBe(true);
+    expect(routeTouchesLabel(route, input.edges[0].via!, 100, 20)).toBe(true);
+  });
+
+  it("routes through a label node without turning behind it", () => {
+    const via = { x: 100, y: 120 };
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 200, y: 0, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1, via, labelWidth: 180, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const [route] = routeOrthogonal(input);
+    expect(routeTouchesLabel(route, via, 180, 16)).toBe(true);
+    expect(
+      route.points
+        .slice(1, -1)
+        .some(
+          (p) =>
+            Math.abs(p.x - via.x) < 104 - 1e-6 &&
+            Math.abs(p.y - via.y) < 20 - 1e-6,
+        ),
+    ).toBe(false);
+    for (let i = 1; i < route.points.length; i++) {
+      expect(
+        route.points[i].x === route.points[i - 1].x ||
+          route.points[i].y === route.points[i - 1].y,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps other edges clear of label nodes", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 60, height: 60 },
+        { x: 400, y: 0, width: 60, height: 60 },
+        { x: 200, y: -200, width: 60, height: 60 },
+        { x: 200, y: 200, width: 60, height: 60 },
+      ],
+      edges: [
+        {
+          source: 0,
+          target: 1,
+          via: { x: 200, y: 0 },
+          labelWidth: 100,
+          labelHeight: 20,
+        },
+        { source: 2, target: 3 },
+      ],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = routeOrthogonal(input);
+    expect(routeTouchesLabel(routes[0], input.edges[0].via!, 100, 20)).toBe(
+      true,
+    );
+    const label = { minX: 146, maxX: 254, minY: -12, maxY: 12 };
+    expect(
+      routes[1].points
+        .slice(1)
+        .some((p, i) => segmentHitsBox(routes[1].points[i], p, label)),
+    ).toBe(false);
+  });
+
+  it("keeps the path orthogonal when a label node cannot be reached", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 60, height: 60 },
+        { x: 400, y: 100, width: 60, height: 60 },
+      ],
+      edges: [
+        {
+          source: 0,
+          target: 1,
+          via: { x: 200, y: 300 },
+          labelWidth: 80,
+          labelHeight: 20,
+        },
+      ],
+      groups: [
+        {
+          rect: { minX: 100, maxX: 300, minY: 200, maxY: 400 },
+          members: new Set(),
+        },
+      ],
+      clearance: 8,
+    };
+    const [{ points }] = routeOrthogonal(input);
+    expect(points.length).toBeGreaterThan(2);
+    for (let i = 1; i < points.length; i++) {
+      expect(
+        points[i].x === points[i - 1].x || points[i].y === points[i - 1].y,
+      ).toBe(true);
+    }
+    expect(routeTouchesLabel({ points }, input.edges[0].via!, 80, 20)).toBe(
+      false,
+    );
+  });
+
+  it("reroutes a detached label on a straight section without hiding bends", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 200, y: 0, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1, labelWidth: 140, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = [
+      {
+        points: [
+          { x: 50, y: 0 },
+          { x: 150, y: 0 },
+        ],
+      },
+    ];
+    const spots = [
+      { x: 100, y: 100, anchorX: 100, anchorY: 0, detached: true },
+    ];
+    const [route] = bendOrthogonalToLabels(input, routes, spots);
+    expect(routeTouchesLabel(route, spots[0], 140, 16)).toBe(true);
+    expect(
+      route.points
+        .slice(1, -1)
+        .every(
+          (point) =>
+            Math.abs(point.x - 100) >= 80 || Math.abs(point.y - 100) >= 16,
+        ),
+    ).toBe(true);
+    for (let i = 1; i < route.points.length; i++) {
+      expect(
+        route.points[i].x === route.points[i - 1].x ||
+          route.points[i].y === route.points[i - 1].y,
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the original route when the label cannot be reached safely", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 200, y: 0, width: 100, height: 60 },
+        { x: 100, y: 100, width: 200, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1, labelWidth: 80, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = [
+      {
+        points: [
+          { x: 50, y: 0 },
+          { x: 150, y: 0 },
+        ],
+      },
+    ];
+    const spots = [
+      { x: 100, y: 100, anchorX: 100, anchorY: 0, detached: true },
+    ];
+    expect(bendOrthogonalToLabels(input, routes, spots)).toEqual(routes);
+  });
+
+  it("rejects detached-label reroutes that turn within 10 pixels of the chip", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 200, y: 0, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1, labelWidth: 180, labelHeight: 16 }],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = [
+      {
+        points: [
+          { x: 50, y: 0 },
+          { x: 150, y: 0 },
+        ],
+      },
+    ];
+    const spots = [
+      { x: 100, y: 100, anchorX: 100, anchorY: 0, detached: true },
+    ];
+    expect(bendOrthogonalToLabels(input, routes, spots)).toEqual(routes);
+  });
+
+  it("does not add crossings to reach a detached label", () => {
+    const input: RouteInput = {
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 200, y: 0, width: 100, height: 60 },
+        { x: 100, y: 50, width: 10, height: 10 },
+        { x: 100, y: 150, width: 10, height: 10 },
+      ],
+      edges: [
+        { source: 0, target: 1, labelWidth: 140, labelHeight: 16 },
+        { source: 2, target: 3 },
+      ],
+      groups: [],
+      clearance: 8,
+    };
+    const routes = [
+      {
+        points: [
+          { x: 50, y: 0 },
+          { x: 150, y: 0 },
+        ],
+      },
+      {
+        points: [
+          { x: 100, y: 55 },
+          { x: 100, y: 145 },
+        ],
+      },
+    ];
+    const spots = [
+      { x: 100, y: 100, anchorX: 100, anchorY: 0, detached: true },
+      null,
+    ];
+    expect(bendOrthogonalToLabels(input, routes, spots)).toEqual(routes);
+  });
+
+  function expectCenteredEnd(
+    end: { x: number; y: number },
+    adjacent: { x: number; y: number },
+    node: RouteInput["nodes"][number],
+  ) {
+    const horizontal =
+      Math.abs(end.y - node.y) < 0.250001 &&
+      Math.abs(adjacent.y - node.y) < 0.250001 &&
+      Math.abs(Math.abs(end.x - node.x) - node.width / 2) < 1e-6;
+    const vertical =
+      Math.abs(end.x - node.x) < 0.250001 &&
+      Math.abs(adjacent.x - node.x) < 0.250001 &&
+      Math.abs(Math.abs(end.y - node.y) - node.height / 2) < 1e-6;
+    expect(horizontal || vertical).toBe(true);
+  }
+
+  it.each([false, true])(
+    "keeps subpixel-aligned connections straight (vertical: %s)",
+    (vertical) => {
+      const nodes = [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 400, y: 0.04, width: 100, height: 60 },
+      ].map((node) => (vertical ? { ...node, x: node.y, y: node.x } : node));
+      const [{ points }] = routeOrthogonal({
+        nodes,
+        edges: [{ source: 0, target: 1 }],
+        groups: [],
+        clearance: 8,
+      });
+      expect(points).toHaveLength(2);
+      expect(vertical ? points[0].x : points[0].y).toBeCloseTo(0.02);
+      expectCenteredEnd(points[0], points[1], nodes[0]);
+      expectCenteredEnd(points[1], points[0], nodes[1]);
+    },
+  );
+
+  it.each([
+    { x: 300, y: 20, width: 140, height: 80 },
+    { x: 20, y: 300, width: 140, height: 80 },
+    { x: 300, y: 200, width: 140, height: 80 },
+    { x: -300, y: -20, width: 140, height: 80 },
+    { x: 0.25, y: 300, width: 140, height: 80 },
+  ])("connects side midpoints for a target at ($x, $y)", (target) => {
+    const source = { x: 0, y: 0, width: 100, height: 60 };
+    const [route] = routeOrthogonal({
+      nodes: [source, target],
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 8,
+    });
+    const points = route.points;
+    expectCenteredEnd(points[0], points[1], source);
+    expectCenteredEnd(
+      points[points.length - 1],
+      points[points.length - 2],
+      target,
+    );
+    for (let i = 1; i < points.length; i++) {
+      expect(
+        Math.abs(points[i].x - points[i - 1].x) < 1e-6 ||
+          Math.abs(points[i].y - points[i - 1].y) < 1e-6,
+      ).toBe(true);
+    }
+  });
+
   it("routes around a node using only horizontal and vertical segments", () => {
     const [route] = routeOrthogonal(blocked);
     expect(hitsMiddle(route.points)).toBe(false);
@@ -192,6 +533,7 @@ describe("routeOrthogonal", () => {
       expect(Math.abs(a.x - b.x) < 1e-6 || Math.abs(a.y - b.y) < 1e-6).toBe(
         true,
       );
+      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(20);
     }
     // Starts on the source border and ends on the target border.
     const onBorder = (
@@ -206,6 +548,12 @@ describe("routeOrthogonal", () => {
     expect(
       onBorder(route.points[route.points.length - 1], blocked.nodes[2]),
     ).toBe(true);
+    expectCenteredEnd(route.points[0], route.points[1], blocked.nodes[0]);
+    expectCenteredEnd(
+      route.points[route.points.length - 1],
+      route.points[route.points.length - 2],
+      blocked.nodes[2],
+    );
   });
 
   it("avoids boundaries that contain neither endpoint", () => {
@@ -217,4 +565,157 @@ describe("routeOrthogonal", () => {
     });
     expect(hitsMiddle(route.points)).toBe(false);
   });
+
+  it("keeps shared endpoints centred while routing around obstacles", () => {
+    const input: RouteInput = {
+      ...blocked,
+      nodes: [
+        { ...blocked.nodes[0], x: 0.25 },
+        blocked.nodes[1],
+        { ...blocked.nodes[2], y: 0.25 },
+        { x: 400, y: 160, width: 140, height: 80 },
+      ],
+      edges: [
+        { source: 0, target: 2 },
+        { source: 0, target: 3 },
+        { source: 3, target: 2 },
+      ],
+    };
+    const routes = routeOrthogonal(input);
+    routes.forEach(({ points }, i) => {
+      const { source, target } = input.edges[i];
+      expectCenteredEnd(points[0], points[1], input.nodes[source]);
+      expectCenteredEnd(
+        points[points.length - 1],
+        points[points.length - 2],
+        input.nodes[target],
+      );
+      expect(hitsMiddle(points)).toBe(false);
+    });
+  });
+
+  it("places a small vertical adjustment midway between nodes", () => {
+    const [route] = routeOrthogonal({
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 400, y: 24, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 8,
+    });
+    expect(route.points).toEqual([
+      { x: 50, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 24 },
+      { x: 350, y: 24 },
+    ]);
+  });
+
+  it("leaves room for an arrowhead rather than bending just before it", () => {
+    const [route] = routeOrthogonal({
+      nodes: [
+        { x: 0, y: 0, width: 100, height: 60 },
+        { x: 400, y: 8, width: 100, height: 60 },
+      ],
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 8,
+    });
+    for (let i = 1; i < route.points.length; i++) {
+      expect(
+        Math.hypot(
+          route.points[i].x - route.points[i - 1].x,
+          route.points[i].y - route.points[i - 1].y,
+        ),
+      ).toBeGreaterThanOrEqual(20);
+    }
+  });
+
+  it("keeps tight spaces orthogonal when full-length approaches cannot fit", () => {
+    const nodes = [
+      { x: 0, y: 0, width: 20, height: 20 },
+      { x: 25, y: 8, width: 20, height: 20 },
+    ];
+    const [{ points }] = routeOrthogonal({
+      nodes,
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 2,
+    });
+    expectCenteredEnd(points[0], points[1], nodes[0]);
+    expectCenteredEnd(
+      points[points.length - 1],
+      points[points.length - 2],
+      nodes[1],
+    );
+    for (let i = 1; i < points.length; i++) {
+      expect(
+        points[i].x === points[i - 1].x || points[i].y === points[i - 1].y,
+      ).toBe(true);
+    }
+  });
+
+  it.each([false, true])(
+    "separates parallel routes beyond shared attachment stubs (vertical: %s)",
+    (vertical) => {
+      const nodes = [
+        { x: 0, y: 0, width: 60, height: 60 },
+        { x: 400, y: 0, width: 60, height: 60 },
+      ].map((node) => (vertical ? { ...node, x: node.y, y: node.x } : node));
+      const routes = routeOrthogonal({
+        nodes,
+        edges: [
+          { source: 0, target: 1 },
+          { source: 0, target: 1 },
+          { source: 1, target: 0 },
+        ],
+        groups: [],
+        clearance: 8,
+      });
+      const runs = routes.map(({ points }) => {
+        const oriented = points.map((p) => (vertical ? { x: p.y, y: p.x } : p));
+        return oriented.slice(1).flatMap((b, i) => {
+          const a = oriented[i];
+          return a.y === b.y
+            ? [
+                {
+                  min: Math.max(50, Math.min(a.x, b.x)),
+                  max: Math.min(350, Math.max(a.x, b.x)),
+                  lane: a.y,
+                },
+              ]
+            : [];
+        });
+      });
+      for (let i = 0; i < runs.length; i++) {
+        for (let j = i + 1; j < runs.length; j++) {
+          for (const a of runs[i]) {
+            for (const b of runs[j]) {
+              if (Math.min(a.max, b.max) > Math.max(a.min, b.min)) {
+                expect(Math.abs(a.lane - b.lane)).toBeGreaterThanOrEqual(6);
+              }
+            }
+          }
+        }
+      }
+      routes.forEach(({ points }, i) => {
+        const source = i === 2 ? 1 : 0;
+        expectCenteredEnd(points[0], points[1], nodes[source]);
+        expectCenteredEnd(
+          points[points.length - 1],
+          points[points.length - 2],
+          nodes[1 - source],
+        );
+        for (let j = 1; j < points.length; j++) {
+          expect(
+            Math.hypot(
+              points[j].x - points[j - 1].x,
+              points[j].y - points[j - 1].y,
+            ),
+          ).toBeGreaterThanOrEqual(20);
+        }
+      });
+    },
+  );
 });

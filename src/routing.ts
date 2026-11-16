@@ -452,6 +452,11 @@ export function routeCurved(input: RouteInput): EdgeRoute[] {
 
 // --- orthogonal ---------------------------------------------------------------
 
+const ORTHOGONAL_GAP = 6;
+const ORTHOGONAL_LABEL_TURN_GAP = 10;
+const ORTHOGONAL_MIN_SECTION = 20;
+const ORTHOGONAL_ALIGNMENT_TOLERANCE = 0.5;
+
 class MinHeap {
   private keys: number[] = [];
   private values: number[] = [];
@@ -504,7 +509,7 @@ function uniqueSorted(values: number[], minSpacing: number): number[] {
   const sorted = [...values].sort((a, b) => a - b);
   const result: number[] = [];
   for (const value of sorted) {
-    if (result.length === 0 || value - result[result.length - 1] > 0.5)
+    if (result.length === 0 || value !== result[result.length - 1])
       result.push(value);
   }
   // Channel centres give routes a line midway between obstacles.
@@ -527,8 +532,12 @@ function simplify(points: Pt[]): Pt[] {
     if (result.length >= 2) {
       const prev = result[result.length - 2];
       const collinear =
-        (Math.abs(prev.x - last.x) < EPS && Math.abs(last.x - p.x) < EPS) ||
-        (Math.abs(prev.y - last.y) < EPS && Math.abs(last.y - p.y) < EPS);
+        (Math.abs(prev.x - last.x) < EPS &&
+          Math.abs(last.x - p.x) < EPS &&
+          (last.y - prev.y) * (p.y - last.y) >= 0) ||
+        (Math.abs(prev.y - last.y) < EPS &&
+          Math.abs(last.y - p.y) < EPS &&
+          (last.x - prev.x) * (p.x - last.x) >= 0);
       if (collinear) {
         result[result.length - 1] = p;
         continue;
@@ -560,10 +569,21 @@ function clipToBorders(points: Pt[], source: Box, target: Box): Pt[] {
   return clipped;
 }
 
+function onCenterAxis(a: Pt, b: Pt, node: Pt, tolerance = EPS): boolean {
+  return (
+    (Math.abs(a.x - node.x) < tolerance &&
+      Math.abs(b.x - node.x) < tolerance) ||
+    (Math.abs(a.y - node.y) < tolerance && Math.abs(b.y - node.y) < tolerance)
+  );
+}
+
 export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
   const { nodes, edges, groups, clearance } = input;
   const nodeBoxes = nodes.map((node) => nodeBox(node));
   const paddedNodes = nodes.map((node) => nodeBox(node, clearance));
+  const portBoxes = nodes.map((node) =>
+    nodeBox(node, Math.max(clearance, ORTHOGONAL_MIN_SECTION)),
+  );
   const groupBoxes = groups.map((group) => expand(group.rect, clearance / 2));
 
   const xs: number[] = [];
@@ -576,6 +596,10 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
       node.x,
       node.x - node.width / 4,
       node.x + node.width / 4,
+      portBoxes[index].minX,
+      portBoxes[index].maxX,
+      box.minX - ORTHOGONAL_GAP,
+      box.maxX + ORTHOGONAL_GAP,
     );
     ys.push(
       box.minY,
@@ -583,12 +607,42 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
       node.y,
       node.y - node.height / 4,
       node.y + node.height / 4,
+      portBoxes[index].minY,
+      portBoxes[index].maxY,
+      box.minY - ORTHOGONAL_GAP,
+      box.maxY + ORTHOGONAL_GAP,
     );
   });
   for (const box of groupBoxes) {
     xs.push(box.minX - clearance / 2, box.maxX + clearance / 2);
     ys.push(box.minY - clearance / 2, box.maxY + clearance / 2);
   }
+  const labelBoxes = edges.map((edge) =>
+    edge.via
+      ? expand(
+          labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0),
+          clearance / 2,
+        )
+      : null,
+  );
+  const labelTurnBoxes = edges.map((edge) =>
+    edge.via
+      ? expand(
+          labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0),
+          ORTHOGONAL_LABEL_TURN_GAP,
+        )
+      : null,
+  );
+  edges.forEach((edge, i) => {
+    const box = labelBoxes[i];
+    if (!edge.via || !box) return;
+    const own = labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0);
+    xs.push(edge.via.x, box.minX, box.maxX, own.minX, own.maxX);
+    ys.push(edge.via.y, box.minY, box.maxY, own.minY, own.maxY);
+    const turnBox = labelTurnBoxes[i]!;
+    xs.push(turnBox.minX, turnBox.maxX);
+    ys.push(turnBox.minY, turnBox.maxY);
+  });
   const gx = uniqueSorted(xs, clearance);
   const gy = uniqueSorted(ys, clearance);
   const nx = gx.length;
@@ -634,18 +688,25 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
         })
       : null,
   );
-  const insideNode = (i: number, node: number) =>
-    strictlyInside(pointOf(i), nodeBoxes[node]);
+  const centers = nodes.map(
+    (node) => gy.indexOf(node.y) * nx + gx.indexOf(node.x),
+  );
 
   const hUsage = new Float64Array(total);
   const vUsage = new Float64Array(total);
+  const hNear = new Float64Array(total);
+  const vNear = new Float64Array(total);
   // A bend costs as much as a long detour, and a crossing more than any
   // realistic detour, so A* only bends or crosses when it has to.
   const BEND = Math.max(150, clearance * 15);
   const CROSS = 1e5;
-  const OVERLAP = 3;
+  const OVERLAP = 100;
 
-  const routeOne = (edge: RouteEdge): number[] | null => {
+  const routeOne = (
+    edge: RouteEdge,
+    edgeIndex: number,
+    endpointBoxes: Box[],
+  ): number[] | null => {
     const { source, target } = edge;
     const foreign = groups.map(
       (group) => !group.members.has(source) && !group.members.has(target),
@@ -666,48 +727,95 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
         Math.max(0, tb.minY - p.y, p.y - tb.maxY)
       );
     };
-    const states = total * 5;
+    const ownLabel = edge.via
+      ? labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0)
+      : null;
+    const foreignLabels = labelBoxes.filter(
+      (box, i): box is Box => box !== null && i !== edgeIndex,
+    );
+    const via = edge.via && ownLabel ? { ...edge.via } : null;
+    if (via && ownLabel) {
+      const core = labelCore(ownLabel);
+      if (
+        Math.abs(nodes[source].x - nodes[target].x) < EPS &&
+        nodes[source].x > core.minX &&
+        nodes[source].x < core.maxX
+      ) {
+        via.x = nodes[source].x;
+      } else if (
+        Math.abs(nodes[source].y - nodes[target].y) < EPS &&
+        nodes[source].y > core.minY &&
+        nodes[source].y < core.maxY
+      ) {
+        via.y = nodes[source].y;
+      }
+    }
+    const viaIndex = via ? gy.indexOf(via.y) * nx + gx.indexOf(via.x) : -1;
+    const states = total * 10;
     const cost = new Float64Array(states).fill(Infinity);
     const parent = new Int32Array(states).fill(-1);
     const heap = new MinHeap();
-    for (let i = 0; i < total; i++) {
-      if (insideNode(i, source)) {
-        const state = i * 5 + 4;
-        cost[state] = 0;
-        heap.push(heuristic(i), state);
-      }
-    }
+    const start = centers[source] * 10 + 8 + (edge.via ? 0 : 1);
+    cost[start] = 0;
+    heap.push(heuristic(centers[source]), start);
     while (heap.size > 0) {
       const state = heap.pop();
-      const i = Math.floor(state / 5);
-      const dir = state % 5;
-      if (insideNode(i, target)) {
+      const i = Math.floor(state / 10);
+      const dir = Math.floor((state % 10) / 2);
+      const passedVia = state % 2;
+      if (i === centers[target] && passedVia) {
         const path: number[] = [];
-        for (let s = state; s >= 0; s = parent[s]) path.push(Math.floor(s / 5));
+        for (let s = state; s >= 0; s = parent[s])
+          path.push(Math.floor(s / 10));
         return path.reverse();
       }
       const base = cost[state];
       const col = i % nx;
       const row = Math.floor(i / nx);
-      const moves: Array<
-        [number, number, (typeof hInfo)[number], Float64Array, number]
-      > = [];
-      if (col < nx - 1) moves.push([i + 1, 0, hInfo[i], hUsage, i]);
-      if (col > 0) moves.push([i - 1, 1, hInfo[i - 1], hUsage, i - 1]);
-      if (row < ny - 1) moves.push([i + nx, 2, vInfo[i], vUsage, i]);
-      if (row > 0) moves.push([i - nx, 3, vInfo[i - nx], vUsage, i - nx]);
-      for (const [next, nextDir, info, usage, segment] of moves) {
+      const moves: Array<[number, number, (typeof hInfo)[number], number]> = [];
+      if (col < nx - 1) moves.push([i + 1, 0, hInfo[i], i]);
+      if (col > 0) moves.push([i - 1, 1, hInfo[i - 1], i - 1]);
+      if (row < ny - 1) moves.push([i + nx, 2, vInfo[i], i]);
+      if (row > 0) moves.push([i - nx, 3, vInfo[i - nx], i - nx]);
+      for (const [next, nextDir, info, segment] of moves) {
+        if (dir !== 4 && (dir ^ 1) === nextDir) continue;
         if (blocked(info) || blocked(pointInfo[next])) continue;
         const free = local(i) && local(next);
         const p = pointOf(i);
         const q = pointOf(next);
+        if (
+          foreignLabels.some(
+            (box) => strictlyInside(q, box) || segmentHitsBox(p, q, box),
+          ) ||
+          (ownLabel &&
+            via &&
+            segmentHitsBox(p, q, ownLabel) &&
+            !onCenterAxis(p, q, via)) ||
+          (dir !== 4 &&
+            dir !== nextDir &&
+            labelTurnBoxes.some((box) => box && strictlyInside(p, box)))
+        ) {
+          continue;
+        }
+        // Leave a full straight section beside each arrowhead.
+        if (
+          [source, target].some(
+            (node) =>
+              segmentHitsBox(p, q, endpointBoxes[node]) &&
+              !onCenterAxis(p, q, nodes[node]),
+          )
+        ) {
+          continue;
+        }
         const length = Math.abs(p.x - q.x) + Math.abs(p.y - q.y);
-        let step = free ? 0 : length * (1 + OVERLAP * usage[segment]);
+        const nearby = nextDir < 2 ? hNear[segment] : vNear[segment];
+        let step = free ? 0 : length * (1 + OVERLAP * nearby);
         if (!free && dir !== 4 && dir !== nextDir) step += BEND;
         const horizontal = nextDir < 2;
         if (!local(next) && (horizontal ? vCross(next) : hCross(next)))
           step += CROSS;
-        const nextState = next * 5 + nextDir;
+        const nextState =
+          next * 10 + nextDir * 2 + (passedVia || next === viaIndex ? 1 : 0);
         if (base + step < cost[nextState] - EPS) {
           cost[nextState] = base + step;
           parent[nextState] = state;
@@ -736,8 +844,24 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
         continue;
       }
       const low = Math.min(a, b);
-      if (Math.abs(a - b) === 1) hUsage[low] += delta;
+      const horizontal = Math.abs(a - b) === 1;
+      if (horizontal) hUsage[low] += delta;
       else vUsage[low] += delta;
+      const coordinates = horizontal ? gy : gx;
+      const position = horizontal ? Math.floor(low / nx) : low % nx;
+      for (let offset = -1; offset <= 1; offset += 2) {
+        for (
+          let j = position + (offset < 0 ? 0 : 1);
+          j >= 0 &&
+          j < coordinates.length &&
+          Math.abs(coordinates[j] - coordinates[position]) <
+            ORTHOGONAL_GAP - EPS;
+          j += offset
+        ) {
+          const index = low + (j - position) * (horizontal ? nx : 1);
+          (horizontal ? hNear : vNear)[index] += delta;
+        }
+      }
     }
   };
 
@@ -745,6 +869,11 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
   const order = edges
     .map((_, index) => index)
     .sort((a, b) => {
+      const aligned = (e: RouteEdge) =>
+        Math.abs(nodes[e.source].x - nodes[e.target].x) < EPS ||
+        Math.abs(nodes[e.source].y - nodes[e.target].y) < EPS;
+      const priority = Number(aligned(edges[b])) - Number(aligned(edges[a]));
+      if (priority) return priority;
       const length = (e: RouteEdge) =>
         Math.abs(nodes[e.source].x - nodes[e.target].x) +
         Math.abs(nodes[e.source].y - nodes[e.target].y);
@@ -753,8 +882,21 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
   for (let pass = 0; pass < 2; pass++) {
     for (const index of order) {
       const edge = edges[index];
+      if (
+        pass > 0 &&
+        paths[index] &&
+        simplify(paths[index]!.map(pointOf)).length === 2
+      ) {
+        continue;
+      }
       if (paths[index]) markUsage(paths[index]!, -1, edge);
-      paths[index] = routeOne(edge);
+      paths[index] =
+        routeOne(edge, index, portBoxes) ??
+        routeOne(edge, index, paddedNodes) ??
+        (edge.via
+          ? (routeOne({ ...edge, via: undefined }, index, portBoxes) ??
+            routeOne({ ...edge, via: undefined }, index, paddedNodes))
+          : null);
       if (paths[index]) markUsage(paths[index]!, 1, edge);
     }
   }
@@ -783,30 +925,23 @@ export function routeOrthogonal(input: RouteInput): EdgeRoute[] {
   return preferSimpleRoutes(input, routes);
 }
 
-// Straight, one-bend (L) and two-bend (Z) routes between two nodes, as
-// centre-to-centre polylines (clipped to the node borders by the caller).
+// Centre-to-centre candidates, clipped to the node borders by the caller.
 function simpleOrthogonalShapes(s: RouteNode, t: RouteNode): Pt[][] {
   const shapes: Pt[][] = [];
-  const sb = nodeBox(s);
-  const tb = nodeBox(t);
-  const overlapX = [Math.max(sb.minX, tb.minX), Math.min(sb.maxX, tb.maxX)];
-  const overlapY = [Math.max(sb.minY, tb.minY), Math.min(sb.maxY, tb.maxY)];
-  // Straight: the boxes share an x (or y) range.
-  for (const f of [0.5, 0.25, 0.75]) {
-    if (overlapX[1] - overlapX[0] > 8) {
-      const x = overlapX[0] + (overlapX[1] - overlapX[0]) * f;
-      shapes.push([
-        { x, y: s.y },
-        { x, y: t.y },
-      ]);
-    }
-    if (overlapY[1] - overlapY[0] > 8) {
-      const y = overlapY[0] + (overlapY[1] - overlapY[0]) * f;
-      shapes.push([
-        { x: s.x, y },
-        { x: t.x, y },
-      ]);
-    }
+  // Solver noise must not turn a visually aligned connection into a detour.
+  if (Math.abs(s.x - t.x) < ORTHOGONAL_ALIGNMENT_TOLERANCE) {
+    const x = (s.x + t.x) / 2;
+    shapes.push([
+      { x, y: s.y },
+      { x, y: t.y },
+    ]);
+  }
+  if (Math.abs(s.y - t.y) < ORTHOGONAL_ALIGNMENT_TOLERANCE) {
+    const y = (s.y + t.y) / 2;
+    shapes.push([
+      { x: s.x, y },
+      { x: t.x, y },
+    ]);
   }
   // L: leave horizontally then vertically, or the other way round.
   shapes.push(
@@ -823,8 +958,14 @@ function simpleOrthogonalShapes(s: RouteNode, t: RouteNode): Pt[][] {
   );
   // Z: two bends with the middle leg at a few positions between the nodes.
   for (const f of [0.5, 0.3, 0.7, 0.15, 0.85]) {
-    const mx = s.x + (t.x - s.x) * f;
-    const my = s.y + (t.y - s.y) * f;
+    const mx =
+      s.x +
+      (t.x - s.x) * f +
+      (f === 0.5 ? (Math.sign(t.x - s.x) * (s.width - t.width)) / 4 : 0);
+    const my =
+      s.y +
+      (t.y - s.y) * f +
+      (f === 0.5 ? (Math.sign(t.y - s.y) * (s.height - t.height)) / 4 : 0);
     shapes.push(
       [
         { x: s.x, y: s.y },
@@ -840,6 +981,43 @@ function simpleOrthogonalShapes(s: RouteNode, t: RouteNode): Pt[][] {
       ],
     );
   }
+  // Separate parallel runs after a short, centred attachment stub.
+  const stub = ORTHOGONAL_MIN_SECTION;
+  const sx = s.x + Math.sign(t.x - s.x) * (s.width / 2 + stub);
+  const tx = t.x - Math.sign(t.x - s.x) * (t.width / 2 + stub);
+  const sy = s.y + Math.sign(t.y - s.y) * (s.height / 2 + stub);
+  const ty = t.y - Math.sign(t.y - s.y) * (t.height / 2 + stub);
+  for (const offset of [
+    -stub,
+    stub,
+    -stub - ORTHOGONAL_GAP,
+    stub + ORTHOGONAL_GAP,
+  ]) {
+    if (Math.abs(t.x - s.x) > s.width / 2 + t.width / 2 + 2 * stub) {
+      for (const y of [s.y + offset, t.y + offset]) {
+        shapes.push([
+          { x: s.x, y: s.y },
+          { x: sx, y: s.y },
+          { x: sx, y },
+          { x: tx, y },
+          { x: tx, y: t.y },
+          { x: t.x, y: t.y },
+        ]);
+      }
+    }
+    if (Math.abs(t.y - s.y) > s.height / 2 + t.height / 2 + 2 * stub) {
+      for (const x of [s.x + offset, t.x + offset]) {
+        shapes.push([
+          { x: s.x, y: s.y },
+          { x: s.x, y: sy },
+          { x, y: sy },
+          { x, y: ty },
+          { x: t.x, y: ty },
+          { x: t.x, y: t.y },
+        ]);
+      }
+    }
+  }
   return shapes;
 }
 
@@ -847,14 +1025,24 @@ function bendCount(points: Pt[]): number {
   return Math.max(0, simplify(points).length - 2);
 }
 
-// Replace each A* route by a straight, L or Z route when one is at least as
-// good: no more obstacle hits or crossings, then fewer bends, then shorter.
+// Prefer clear, separated routes with full straight sections, then fewer
+// bends and shorter, balanced approaches to the endpoints.
 function preferSimpleRoutes(
   input: RouteInput,
   routes: EdgeRoute[],
 ): EdgeRoute[] {
   const { nodes, edges } = input;
   const obstacles = edges.map((edge) => obstaclesFor(input, edge));
+  const labelTurnBoxes = edges.flatMap((edge) =>
+    edge.via
+      ? [
+          expand(
+            labelBox(edge.via, edge.labelWidth ?? 0, edge.labelHeight ?? 0),
+            ORTHOGONAL_LABEL_TURN_GAP,
+          ),
+        ]
+      : [],
+  );
   const rank = (index: number, points: Pt[]) => {
     const bounds = polylineBounds(points);
     let hits = 0;
@@ -862,19 +1050,41 @@ function preferSimpleRoutes(
       if (boxesOverlap(bounds, box) && polylineHitsBox(points, box)) hits++;
     }
     let crossings = 0;
-    let overlaps = 0;
+    let crowding = 0;
     routes.forEach((other, j) => {
       if (j === index) return;
-      if (!boxesOverlap(bounds, polylineBounds(other.points))) return;
+      if (
+        !boxesOverlap(
+          expand(bounds, ORTHOGONAL_GAP),
+          polylineBounds(other.points),
+        )
+      ) {
+        return;
+      }
       crossings += polylineCrossings(points, other.points);
-      overlaps += collinearOverlap(points, other.points) > 2 ? 1 : 0;
+      const edge = edges[index];
+      const otherEdge = edges[j];
+      const shared = [...new Set([edge.source, edge.target])]
+        .filter(
+          (node) => node === otherEdge.source || node === otherEdge.target,
+        )
+        .map((node) => nodeBox(nodes[node], ORTHOGONAL_MIN_SECTION));
+      crowding += parallelCrowding(points, other.points, shared);
     });
+    const lengths = points
+      .slice(1)
+      .map((p, i) => Math.hypot(p.x - points[i].x, p.y - points[i].y));
+    const minimum = points.length > 2 ? ORTHOGONAL_MIN_SECTION : 0;
     return [
       hits,
       crossings,
-      overlaps,
+      Math.max(0, minimum - lengths[0]) +
+        Math.max(0, minimum - lengths[lengths.length - 1]),
+      lengths.reduce((sum, length) => sum + Math.max(0, minimum - length), 0),
+      crowding,
       bendCount(points),
       polylineLength(points),
+      Math.abs(lengths[0] - lengths[lengths.length - 1]),
     ];
   };
   const better = (a: number[], b: number[]) => {
@@ -888,10 +1098,45 @@ function preferSimpleRoutes(
     edges.forEach((edge, index) => {
       const s = nodes[edge.source];
       const t = nodes[edge.target];
+      if (edge.via) return;
+      // Route branches around a clear straight connection, not vice versa.
+      if (
+        routes[index].points.length === 2 &&
+        (Math.abs(routes[index].points[0].x - routes[index].points[1].x) <
+          EPS ||
+          Math.abs(routes[index].points[0].y - routes[index].points[1].y) <
+            EPS) &&
+        !obstacles[index].some((box) =>
+          polylineHitsBox(routes[index].points, box),
+        )
+      ) {
+        return;
+      }
       let bestRank = rank(index, routes[index].points);
       for (const shape of simpleOrthogonalShapes(s, t)) {
         const points = simplify(clipToBorders(shape, nodeBox(s), nodeBox(t)));
         if (points.length < 2) continue;
+        if (
+          points
+            .slice(1, -1)
+            .some((point) =>
+              labelTurnBoxes.some((box) => strictlyInside(point, box)),
+            )
+        )
+          continue;
+        const tolerance =
+          points.length === 2 ? ORTHOGONAL_ALIGNMENT_TOLERANCE / 2 + EPS : EPS;
+        if (
+          !onCenterAxis(points[0], points[1], s, tolerance) ||
+          !onCenterAxis(
+            points[points.length - 1],
+            points[points.length - 2],
+            t,
+            tolerance,
+          )
+        ) {
+          continue;
+        }
         const candidateRank = rank(index, points);
         if (better(candidateRank, bestRank)) {
           bestRank = candidateRank;
@@ -905,8 +1150,8 @@ function preferSimpleRoutes(
   return routes;
 }
 
-// Length along which two polylines run on top of each other.
-function collinearOverlap(p: Pt[], q: Pt[]): number {
+// Parallel runs closer than the gap, excluding unavoidable shared stubs.
+function parallelCrowding(p: Pt[], q: Pt[], shared: Box[]): number {
   let total = 0;
   for (let i = 1; i < p.length; i++) {
     for (let j = 1; j < q.length; j++) {
@@ -914,17 +1159,36 @@ function collinearOverlap(p: Pt[], q: Pt[]): number {
       const b = p[i];
       const c = q[j - 1];
       const d = q[j];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      if (len < EPS) continue;
-      if (Math.abs(orient(a, b, c)) / len > 0.5) continue;
-      if (Math.abs(orient(a, b, d)) / len > 0.5) continue;
-      const ux = (b.x - a.x) / len;
-      const uy = (b.y - a.y) / len;
-      const tc = (c.x - a.x) * ux + (c.y - a.y) * uy;
-      const td = (d.x - a.x) * ux + (d.y - a.y) * uy;
-      const lo = Math.max(0, Math.min(tc, td));
-      const hi = Math.min(len, Math.max(tc, td));
-      if (hi > lo) total += hi - lo;
+      const horizontal = Math.abs(a.y - b.y) < EPS;
+      if (horizontal !== Math.abs(c.y - d.y) < EPS) continue;
+      const axis = horizontal ? "x" : "y";
+      const cross = horizontal ? "y" : "x";
+      if (Math.abs(a[cross] - c[cross]) >= ORTHOGONAL_GAP - EPS) continue;
+      const lo = Math.max(
+        Math.min(a[axis], b[axis]),
+        Math.min(c[axis], d[axis]),
+      );
+      const hi = Math.min(
+        Math.max(a[axis], b[axis]),
+        Math.max(c[axis], d[axis]),
+      );
+      if (hi <= lo) continue;
+      let overlap = hi - lo;
+      for (const box of shared) {
+        const min = horizontal ? box.minX : box.minY;
+        const max = horizontal ? box.maxX : box.maxY;
+        const crossMin = horizontal ? box.minY : box.minX;
+        const crossMax = horizontal ? box.maxY : box.maxX;
+        if (
+          a[cross] >= crossMin - EPS &&
+          a[cross] <= crossMax + EPS &&
+          c[cross] >= crossMin - EPS &&
+          c[cross] <= crossMax + EPS
+        ) {
+          overlap -= Math.max(0, Math.min(hi, max) - Math.max(lo, min));
+        }
+      }
+      total += Math.max(0, overlap);
     }
   }
   return total;
@@ -996,6 +1260,7 @@ function labelBox(spot: Pt, width: number, height: number): Box {
 export function placeRouteLabels(
   input: RouteInput,
   routes: EdgeRoute[],
+  mode: EdgeRouting = "curved",
 ): Array<LabelSpot | null> {
   const nodeBoxes = input.nodes.map((node) =>
     nodeBox(node, LABEL_NODE_CLEARANCE),
@@ -1007,6 +1272,16 @@ export function placeRouteLabels(
       : [],
   );
   const routeBounds = routes.map((route) => polylineBounds(route.points));
+  const bends =
+    mode === "orthogonal"
+      ? routes.flatMap(({ points }) =>
+          points
+            .slice(1, -1)
+            .filter(
+              (p, i) => Math.abs(orient(points[i], p, points[i + 2])) > EPS,
+            ),
+        )
+      : [];
   // Label spots sticking out of the footprint grow the drawing, so they lose
   // to spots inside.
   const footprint = footprintOf(input);
@@ -1026,6 +1301,18 @@ export function placeRouteLabels(
     const fractions = [0.5];
     for (let step = 0.04; step <= 0.4 + EPS; step += 0.04) {
       fractions.push(0.5 - step, 0.5 + step);
+    }
+    if (mode === "orthogonal") {
+      const length = polylineLength(route.points);
+      let before = 0;
+      for (let i = 1; i < route.points.length && length > EPS; i++) {
+        const section = Math.hypot(
+          route.points[i].x - route.points[i - 1].x,
+          route.points[i].y - route.points[i - 1].y,
+        );
+        fractions.push((before + section / 2) / length);
+        before += section;
+      }
     }
     for (const fraction of fractions) {
       const at = pointAlong(route.points, fraction);
@@ -1057,6 +1344,10 @@ export function placeRouteLabels(
             anchorY: at.y,
           };
           const box = labelBox(spot, width, height);
+          const bendClearance = expand(box, ORTHOGONAL_LABEL_TURN_GAP);
+          const hiddenBends = bends.filter((p) =>
+            strictlyInside(p, bendClearance),
+          ).length;
           let hard = 0;
           for (const other of nodeBoxes) if (boxesOverlap(box, other)) hard++;
           for (const other of placed)
@@ -1077,6 +1368,7 @@ export function placeRouteLabels(
             : 1;
           const outside = beyond(box, footprint);
           const rank = [
+            hiddenBends,
             hard,
             soft,
             detached,
@@ -1093,8 +1385,8 @@ export function placeRouteLabels(
     placed.push(best!.box);
     return {
       ...best!.spot,
-      ...(best!.rank[0] > 0 ? { blocked: true } : {}),
-      ...(best!.rank[2] > 0 ? { detached: true } : {}),
+      ...(best!.rank[0] > 0 || best!.rank[1] > 0 ? { blocked: true } : {}),
+      ...(best!.rank[3] > 0 ? { detached: true } : {}),
     };
   });
 }
@@ -1178,6 +1470,129 @@ export function bendToLabels(
       }
     }
     if (best) result[index] = best;
+  });
+  return result;
+}
+
+// Route detached orthogonal labels through a straight section, when safe.
+export function bendOrthogonalToLabels(
+  input: RouteInput,
+  routes: EdgeRoute[],
+  spots: Array<LabelSpot | null>,
+): EdgeRoute[] {
+  const result = [...routes];
+  const boxes = spots.map((spot, i) =>
+    spot
+      ? labelBox(
+          spot,
+          input.edges[i].labelWidth ?? 0,
+          input.edges[i].labelHeight ?? 0,
+        )
+      : null,
+  );
+  input.edges.forEach((edge, index) => {
+    const spot = spots[index];
+    const box = boxes[index];
+    if (
+      !spot ||
+      !box ||
+      routeTouchesLabel(
+        result[index],
+        spot,
+        edge.labelWidth ?? 0,
+        edge.labelHeight ?? 0,
+      )
+    )
+      return;
+    const s = input.nodes[edge.source];
+    const t = input.nodes[edge.target];
+    const obstacles = [
+      ...obstaclesFor(input, edge),
+      nodeBox(s),
+      nodeBox(t),
+      ...boxes.flatMap((other, i) =>
+        other && i !== index ? [expand(other, 2)] : [],
+      ),
+    ];
+    const conflicts = (points: Pt[]) => {
+      let crossings = 0;
+      let crowding = 0;
+      result.forEach((other, j) => {
+        if (j === index) return;
+        crossings += polylineCrossings(points, other.points);
+        const shared = [...new Set([edge.source, edge.target])]
+          .filter(
+            (node) =>
+              node === input.edges[j].source || node === input.edges[j].target,
+          )
+          .map((node) => nodeBox(input.nodes[node], ORTHOGONAL_MIN_SECTION));
+        crowding += parallelCrowding(points, other.points, shared);
+      });
+      return { crossings, crowding };
+    };
+    const allowed = conflicts(result[index].points);
+    const shapes = [
+      [
+        { x: s.x, y: s.y },
+        { x: s.x, y: spot.y },
+        { x: t.x, y: spot.y },
+        { x: t.x, y: t.y },
+      ],
+      [
+        { x: s.x, y: s.y },
+        { x: spot.x, y: s.y },
+        { x: spot.x, y: t.y },
+        { x: t.x, y: t.y },
+      ],
+    ];
+    let best: Pt[] | null = null;
+    for (const shape of shapes) {
+      const points = simplify(clipToBorders(shape, nodeBox(s), nodeBox(t)));
+      if (
+        points.length < 2 ||
+        !routeTouchesLabel(
+          { points },
+          spot,
+          edge.labelWidth ?? 0,
+          edge.labelHeight ?? 0,
+        )
+      )
+        continue;
+      if (
+        !onCenterAxis(points[0], points[1], s) ||
+        !onCenterAxis(points[points.length - 1], points[points.length - 2], t)
+      )
+        continue;
+      if (
+        points
+          .slice(1)
+          .some(
+            (p, i) =>
+              Math.hypot(p.x - points[i].x, p.y - points[i].y) <
+              ORTHOGONAL_MIN_SECTION - EPS,
+          )
+      )
+        continue;
+      if (
+        points
+          .slice(1, -1)
+          .some((p) =>
+            boxes.some(
+              (label) =>
+                label &&
+                strictlyInside(p, expand(label, ORTHOGONAL_LABEL_TURN_GAP)),
+            ),
+          )
+      )
+        continue;
+      if (obstacles.some((obstacle) => polylineHitsBox(points, obstacle)))
+        continue;
+      const { crossings, crowding } = conflicts(points);
+      if (crossings > allowed.crossings || crowding > allowed.crowding + EPS)
+        continue;
+      if (!best || polylineLength(points) < polylineLength(best)) best = points;
+    }
+    if (best) result[index] = { points: best };
   });
   return result;
 }

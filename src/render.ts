@@ -9,11 +9,13 @@ import {
   placeEdgelessAndCompact,
   shiftWithDependents,
   solveLayout,
+  type LayoutConstraint,
   type LayoutSnapshot,
 } from "./layout";
 import {
   beyond,
   bendToLabels,
+  bendOrthogonalToLabels,
   footprintOf,
   LABEL_NODE_CLEARANCE,
   placeRouteLabels,
@@ -481,7 +483,7 @@ export async function renderGraph(
     labelMaxWidth: Number(
       spec.graph?.labelMaxWidth ?? globalStyle.graph?.labelMaxWidth ?? 220,
     ),
-    // Curved layout only: lay out edge labels as nodes that push other nodes
+    // Routed layouts: lay out edge labels as nodes that push other nodes
     // away, with each edge routed through its label. "auto" does so only for
     // labels that can't touch their edge otherwise; true always, false never.
     labelNodes: (() => {
@@ -945,9 +947,9 @@ export async function renderGraph(
   // linked to both endpoints, for the duration of each layout solve. It keeps
   // LABEL_NODE_CLEARANCE from other nodes, so it pushes them (and its own
   // endpoints) apart; its final centre is stored as the link's label position
-  // and the curve is routed through it.
+  // and its edge is routed through it.
   const labelNodeSet = new Set<number>(
-    edgeRouting !== "curved" || graphMeta.labelNodes === "never"
+    edgeRouting === "straight" || graphMeta.labelNodes === "never"
       ? []
       : graphMeta.labelNodes === "always"
         ? links.flatMap((link, i) => (link.label ? [i] : []))
@@ -957,6 +959,7 @@ export async function renderGraph(
   const useLabelNodes = labelNodeSet.size > 0;
   function withLabelNodes<T>(
     run: (layoutNodes: any[], layoutEdges: any[]) => T,
+    preserveLabelPositions = false,
   ): T {
     if (!useLabelNodes) return run(nodes, links);
     const parentOf = new Map<string, string | null>(
@@ -979,8 +982,14 @@ export async function renderGraph(
       const targetChain = new Set(chain(t.boundaryParent));
       const label = {
         id: `\u0000label:${i}`,
-        x: (s.x + t.x) / 2,
-        y: (s.y + t.y) / 2,
+        x:
+          preserveLabelPositions && link.labelX != null
+            ? link.labelX
+            : (s.x + t.x) / 2,
+        y:
+          preserveLabelPositions && link.labelY != null
+            ? link.labelY
+            : (s.y + t.y) / 2,
         width: link.labelWidth + 8,
         height: link.labelHeight + 4,
         boundaryParent:
@@ -1216,7 +1225,18 @@ export async function renderGraph(
       const edgeOrder = score.lengths
         .map((length, index) => ({ index, length }))
         .sort((a, b) => b.length - a.length)
-        .slice(0, SNAP_EDGES[routedMode]);
+        .filter(({ index }, rank) => {
+          if (rank < SNAP_EDGES[routedMode]) return true;
+          if (edgeRouting !== "orthogonal") return false;
+          const edge = score.edges[index];
+          return (["x", "y"] as const).some((axis) => {
+            const delta = Math.abs(
+              current.positions[edge.source][axis] -
+                current.positions[edge.target][axis],
+            );
+            return delta >= 0.5 && delta < 1;
+          });
+        });
       let improved: { candidate: LayoutCandidate; score: typeof score } | null =
         null;
       // Snaps that would win but for a crossing get one untangle attempt.
@@ -1233,7 +1253,8 @@ export async function renderGraph(
           for (const axis of ["y", "x"] as const) {
             nodes.forEach((n, i) => Object.assign(n, current.positions[i]));
             const delta = nodes[anchor][axis] - nodes[moving][axis];
-            if (Math.abs(delta) < 1) continue;
+            if (Math.abs(delta) < (edgeRouting === "orthogonal" ? 0.5 : 1))
+              continue;
             shiftWithDependents(
               nodes,
               boundaries,
@@ -1451,14 +1472,16 @@ export async function renderGraph(
     repair: () => ReturnType<typeof solveLayout>,
   ): LayoutCandidate {
     restoreCandidate(nodes, links, start);
-    const groups = withLabelNodes((layoutNodes, layoutEdges) =>
-      placeEdgelessAndCompact(
-        layoutNodes,
-        boundaries,
-        layoutEdges,
-        spec.constraints || [],
-        options,
-      ),
+    const groups = withLabelNodes(
+      (layoutNodes, layoutEdges) =>
+        placeEdgelessAndCompact(
+          layoutNodes,
+          boundaries,
+          layoutEdges,
+          spec.constraints || [],
+          options,
+        ),
+      edgeRouting === "orthogonal",
     );
     if (!groups) return start;
     let candidate = captureCandidate(nodes, links, {
@@ -1675,16 +1698,35 @@ export async function renderGraph(
             best = candidate;
           }
         }
-        const repair = () =>
-          withLabelNodes((layoutNodes, layoutEdges) =>
+        const repair = () => {
+          const constraints: LayoutConstraint[] = [...(spec.constraints || [])];
+          if (edgeRouting === "orthogonal") {
+            // Keep a successful snap from drifting again during compaction.
+            for (const link of links) {
+              const edge = routeEdgeFor(link);
+              const source = nodes[edge.source];
+              const target = nodes[edge.target];
+              for (const axis of ["x", "y"] as const) {
+                if (Math.abs(source[axis] - target[axis]) < 0.5) {
+                  constraints.push({
+                    type: "align",
+                    axis,
+                    ids: [source.id, target.id],
+                  });
+                }
+              }
+            }
+          }
+          return withLabelNodes((layoutNodes, layoutEdges) =>
             solveLayout(
               layoutNodes,
               boundaries,
               layoutEdges,
-              spec.constraints || [],
+              constraints,
               solveOptions(true),
             ),
           );
+        };
         best = snapLongEdges(best, reference, repair);
         best = untangle(best, reference, repair);
         best = placeEdgeless(best, reference, solveOptions(true), repair);
@@ -1822,13 +1864,13 @@ export async function renderGraph(
       clearance: routeClearance,
     };
     const routes = routeEdges(routeInput, edgeRouting);
-    const spots = placeRouteLabels(routeInput, routes);
+    const spots = placeRouteLabels(routeInput, routes, edgeRouting);
     // Labels pushed off their edge pull the edge over to them instead.
     const finalRoutes =
       edgeRouting === "curved"
         ? bendToLabels(routeInput, routes, spots)
-        : routes;
-    if (edgeRouting === "curved" && graphMeta.labelNodes === "auto") {
+        : bendOrthogonalToLabels(routeInput, routes, spots);
+    if (graphMeta.labelNodes === "auto") {
       // Labels that overlap something, that their edge couldn't bend to reach
       // or that stick out of the layout become label nodes and the graph is
       // laid out again. Earlier label nodes are kept, so each round only adds
@@ -1862,6 +1904,23 @@ export async function renderGraph(
           ...offenders,
         ]);
       }
+    }
+    if (edgeRouting === "orthogonal") {
+      spots.forEach((spot, i) => {
+        if (
+          spot &&
+          !routeTouchesLabel(
+            finalRoutes[i],
+            spot,
+            links[i].labelWidth,
+            links[i].labelHeight,
+          )
+        ) {
+          console.warn(
+            `[orthogonal] could not route ${links[i]._sourceId} -> ${links[i]._targetId} through its label`,
+          );
+        }
+      });
     }
     links.forEach((link, i) => {
       link.route = finalRoutes[i];

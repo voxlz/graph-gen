@@ -1932,6 +1932,9 @@ function edgelessNodes(ctx: LayoutContext): LayoutNode[] {
 
 function placeEdgelessNodes(ctx: LayoutContext) {
   const movable = new Set(edgelessNodes(ctx));
+  const connected = new Set(
+    ctx.edgeEnds.flat().map((index) => ctx.nodes[index]),
+  );
   const gap = ctx.options.nodeGap;
   for (const [index, node] of ctx.nodes.entries()) {
     if (!movable.has(node)) continue;
@@ -1960,9 +1963,13 @@ function placeEdgelessNodes(ctx: LayoutContext) {
       ys.add(Math.round(r.maxY - node.height / 2));
       ys.add(Math.round((r.minY + r.maxY) / 2));
     }
-    const padded = ctx.nodes
-      .filter(present)
-      .map((other) => nodeRect(other, gap / 2));
+    const padded = ctx.nodes.filter(present).map((other) => {
+      const clearance =
+        ctx.options.edgeRouting === "orthogonal"
+          ? Math.min(gapOf(ctx, node), gapOf(ctx, other))
+          : gap;
+      return { rect: nodeRect(other, clearance / 2), clearance };
+    });
     // Boundaries the node isn't in must stay clear of it.
     const foreign = ctx.boundaries.flatMap((boundary) => {
       if (ctx.memberSets.get(boundary.id)?.has(index)) return [];
@@ -1985,7 +1992,13 @@ function placeEdgelessNodes(ctx: LayoutContext) {
     const inside = (value: number, half: number, min: number, max: number) =>
       value - half >= min - EPSILON && value + half <= max + EPSILON;
     const coarse = (values: Set<number>) => [
-      ...new Set([...values].map((value) => Math.round(value / 4) * 4)),
+      ...new Set(
+        [...values].flatMap((value) =>
+          ctx.options.edgeRouting === "orthogonal"
+            ? [Math.floor(value / 4) * 4, Math.ceil(value / 4) * 4]
+            : [Math.round(value / 4) * 4],
+        ),
+      ),
     ];
     const xsInside = coarse(xs).filter((x) =>
       inside(x, node.width / 2, bounds.minX, bounds.maxX),
@@ -2015,13 +2028,26 @@ function placeEdgelessNodes(ctx: LayoutContext) {
         const fix = directionalCorrection(type, a, b, directionalGap);
         return Math.abs(fix.dx) <= EPSILON && Math.abs(fix.dy) <= EPSILON;
       });
+    const peers =
+      ctx.options.edgeRouting === "orthogonal"
+        ? ctx.nodes.filter(
+            (other) =>
+              connected.has(other) &&
+              other.boundaryParent === node.boundaryParent,
+          )
+        : [];
     const candidates: Array<{ x: number; y: number; rank: number[] }> = [];
     for (const x of xsInside) {
       for (const y of ysInside) {
         node.x = x;
         node.y = y;
         const box = nodeRect(node, gap / 2);
-        if (padded.some((other) => rectanglesOverlap(box, other))) continue;
+        if (
+          padded.some((other) =>
+            rectanglesOverlap(nodeRect(node, other.clearance / 2), other.rect),
+          )
+        )
+          continue;
         if (foreign.some((other) => rectanglesOverlap(box, other))) continue;
         const area = areaAt(x, y);
         if (area > startArea * (1 + 1e-6)) continue;
@@ -2035,6 +2061,13 @@ function placeEdgelessNodes(ctx: LayoutContext) {
           rank: [
             Math.round(area / 100),
             blocked,
+            ...(peers.length
+              ? [
+                  Math.min(
+                    ...peers.map((peer) => Math.hypot(x - peer.x, y - peer.y)),
+                  ),
+                ]
+              : []),
             Math.hypot(x - origin.x, y - origin.y),
           ],
         });
@@ -2145,6 +2178,21 @@ export function placeEdgelessAndCompact(
   const area = layoutArea(ctx);
   placeEdgelessNodes(ctx);
   compactLayout(ctx);
+  if (options.edgeRouting === "orthogonal") {
+    for (let round = 0; round < nodes.length; round++) {
+      const positions = nodes.map((node) => ({ x: node.x, y: node.y }));
+      const previousArea = layoutArea(ctx);
+      placeEdgelessNodes(ctx);
+      compactLayout(ctx);
+      if (
+        collectViolations(ctx, false, true).messages.length > 0 ||
+        layoutArea(ctx) >= previousArea * (1 - 1e-6)
+      ) {
+        nodes.forEach((node, i) => Object.assign(node, positions[i]));
+        break;
+      }
+    }
+  }
   if (
     collectViolations(ctx, false, true).messages.length > 0 ||
     layoutArea(ctx) >= area * (1 - 1e-6)

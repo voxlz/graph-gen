@@ -1,5 +1,21 @@
 # Changelog
 
+## v4.3.0
+
+- Orthogonal edges now connect at node-side centres. Subpixel alignment
+  differences below 0.5 px no longer introduce unnecessary bends.
+- Parallel orthogonal runs aim for 6 px separation, except for short shared
+  attachment stubs. Routes favour straight sections of at least 20 px and
+  balanced bends instead of turning just before arrowheads.
+- Orthogonal labels keep a 10 px no-turn margin around their padded chips.
+  Detached labels pull their edge onto a straight section when safe, without
+  adding crossings.
+- The `labelNodes` setting now also supports `orthogonal`, with the same
+  `auto` default as `curved`. Unreachable orthogonal labels produce a warning.
+- Improved orthogonal compaction of disconnected nodes and provider groups,
+  preserving solved label positions and node clearance.
+- Regenerated the orthogonal example renders. Other render modes are unchanged.
+
 ## v4.2.0
 
 - Edge labels in the `curved` and `orthogonal` layouts now touch their own
