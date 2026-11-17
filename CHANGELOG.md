@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v4.5.3
+
+- Build the precompiled CLI bundle automatically before npm packs the package.
 - Renamed the project to `graph-gen` and environment variables to
   `GRAPH_GEN_*`; the previous `GRAPHGEN_*` variables remain supported.
 - Edges and arrowheads connect to rounded node and cylinder outlines instead
