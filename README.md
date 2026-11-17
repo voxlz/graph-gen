@@ -199,6 +199,96 @@ constraints {
 }
 ```
 
+## Install and run (Docker)
+
+The recommended way to run `graph-gen` is via Docker — no local Node or native
+image libraries required.
+
+Build once:
+
+```bash
+docker build -t graph-gen .
+```
+
+Then render, mounting a folder so the PNG lands back on the host:
+
+```bash
+mkdir -p out
+docker run --rm -v "$(pwd)/out:/app/out" graph-gen demo/usecases/bookstore_uc1.ggn out/output.png
+```
+
+The image appears at `./out/output.png` on your machine. Replace the input and
+output paths with your own as needed. Run with `--help` for all arguments and
+environment variables, or `--version` for the installed version.
+
+The output argument is optional. If you omit it, graph-gen picks the output path
+in this order:
+
+1. CLI output argument (`tsx src/index.ts input.ggn out/output.png`)
+2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
+3. Global style setting (`style.jsonc` -> `graph.outputPath`)
+4. Built-in fallback (`../graphs/{file}`)
+
+`{file}` expands to the input filename with a `.png` extension. For example,
+`checkout_scope.ggn` becomes `checkout_scope.png`. Relative paths are resolved
+from the input graph's directory.
+
+Example global default in `style.jsonc`:
+
+```jsonc
+{
+  "graph": {
+    "outputPath": "../graphs/{file}",
+  },
+}
+```
+
+Example per-graph override:
+
+```text
+graph {
+        outputPath "./renders/{file}"
+}
+```
+
+To override the styles, mount your own style file and pass it as the third
+argument (same as the local run):
+
+```bash
+docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style.jsonc" \
+    graph-gen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
+```
+
+### Watch for changes
+
+For local development, run:
+
+```bash
+npm run watch
+```
+
+This watches the current project and mirrors generated images into `renders/`.
+To watch another path while respecting each graph's `outputPath`, the global
+`style.jsonc` setting, and the built-in default, use `--watch` (or `-w`):
+
+```bash
+npx tsx src/index.ts --watch path/to/graphs
+```
+
+You can also provide an output directory explicitly:
+
+```bash
+npx tsx src/index.ts --watch path/to/graphs path/to/renders
+```
+
+With Docker, mount the graphs and keep the container running:
+
+```bash
+docker run --rm -v "$(pwd):/work" graph-gen --watch /work/graphs /work/renders
+```
+
+## Showcase
+
 ### Nodes
 
 Declare nodes. These are the elements that will make up your graph:
