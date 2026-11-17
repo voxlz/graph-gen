@@ -71,21 +71,22 @@ The recommended way to run graphgen is with Node.js 20 or newer and `npx`—no
 repository clone is needed:
 
 ```bash
-npx graph-gen path/to/graph.ggn
-npx graph-gen -r .
-npx graph-gen --watch path/to/graphs
-npx graph-gen --help
+npx @voxlz/graph-gen path/to/graph.ggn
+npx @voxlz/graph-gen -r .
+npx @voxlz/graph-gen --watch path/to/graphs
+npx @voxlz/graph-gen --help
 ```
 
 Or install the `graph-gen` command globally:
 
 ```bash
-npm install -g graph-gen
+npm install -g @voxlz/graph-gen
 graph-gen -r .
 ```
 
-The unscoped npm name `graphgen` belongs to a different project; use
-`npx graph-gen`, not `npx graphgen`.
+The package is published under the `@voxlz` scope because npm reserves the
+similar unscoped names for other projects; `npx graphgen` runs a different
+package.
 
 The npm package includes the compiled CLI and default styles. Rendering uses
 `canvas`: supported platforms use prebuilt native binaries; other platforms
@@ -119,7 +120,7 @@ environment variables, or `--version` for the installed version.
 The output argument is optional. If you omit it, graphgen picks the output path
 in this order:
 
-1. CLI output argument (`npx graph-gen input.ggn out/output.png`)
+1. CLI output argument (`npx @voxlz/graph-gen input.ggn out/output.png`)
 2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
 3. Global style setting (`style.jsonc` -> `graph.outputPath`)
 4. Built-in fallback (`../graphs/{file}`)
@@ -149,7 +150,7 @@ graph {
 To override the bundled styles, pass a style file as the third argument:
 
 ```bash
-npx graph-gen input.ggn out/output.png my-style.jsonc
+npx @voxlz/graph-gen input.ggn out/output.png my-style.jsonc
 ```
 
 With Docker, mount the style file:
@@ -165,8 +166,8 @@ Use `--recursive` (or `-r`) to regenerate every `.ggn` file under a directory,
 including nested directories, then exit:
 
 ```bash
-npx graph-gen -r path/to/graphs
-npx graph-gen -r .
+npx @voxlz/graph-gen -r path/to/graphs
+npx @voxlz/graph-gen -r .
 ```
 
 Omitting the path uses the current directory. Each graph uses its configured
@@ -191,13 +192,13 @@ Use `--watch` (or `-w`) to watch a path while respecting each graph's
 `outputPath`, the global `style.jsonc` setting, and the built-in default:
 
 ```bash
-npx graph-gen --watch path/to/graphs
+npx @voxlz/graph-gen --watch path/to/graphs
 ```
 
 You can also provide an output directory explicitly:
 
 ```bash
-npx graph-gen --watch path/to/graphs path/to/renders
+npx @voxlz/graph-gen --watch path/to/graphs path/to/renders
 ```
 
 With Docker, mount the graphs and keep the container running:
@@ -209,14 +210,14 @@ docker run --rm -v "$(pwd):/work" ghcr.io/voxlz/graph-gen:latest --watch /work/g
 ## Publishing releases
 
 Version tags (`v*`) publish Docker images and the public npm package
-`graph-gen` through separate GitHub Actions workflows. The tag must match
+`@voxlz/graph-gen` through separate GitHub Actions workflows. The tag must match
 the version in `package.json`; update the lockfile and changelog before tagging.
 The npm workflow runs lint, typecheck and tests, then builds the CLI through
 `prepack` and publishes it with provenance.
 
 Before the first npm release, configure the repository Actions secret
 `NPM_TOKEN` with a granular npm access token authorized to create/publish the
-unscoped `graph-gen` package. The token must permit non-interactive
+scoped `@voxlz/graph-gen` package. The token must permit non-interactive
 publishing (including bypassing 2FA where required). Do not commit the token.
 
 To inspect the package locally without publishing:

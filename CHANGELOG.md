@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.5.2
+
+- Published the npm package as `@voxlz/graph-gen` because npm rejects the
+  unscoped `graph-gen` name as too similar to `graphgen`. Run it with
+  `npx @voxlz/graph-gen`; the installed commands remain `graph-gen` and
+  `graphgen`.
+
 ## v4.5.1
 
 - Improved compaction of disconnected nodes and prevented orthogonal

@@ -1,6 +1,6 @@
 {
-  "name": "graph-gen",
-  "version": "4.5.1",
+  "name": "@voxlz/graph-gen",
+  "version": "4.5.2",
   "description": "Constraint-based graph layout -> PNG renderer",
   "main": "dist/index.js",
   "bin": {
