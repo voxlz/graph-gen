@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { rendererCommand } from "./bundle";
+import { graphEnv } from "./env";
 import { parseGraphText } from "./parse";
 
 const rootDir = path.resolve(__dirname, "..");
@@ -116,7 +117,7 @@ function renderGraph(
       // Hint about constraints that block a smaller layout while editing.
       env: {
         ...process.env,
-        GRAPHGEN_CONSTRAINT_HINTS: process.env.GRAPHGEN_CONSTRAINT_HINTS ?? "1",
+        GRAPH_GEN_CONSTRAINT_HINTS: graphEnv("CONSTRAINT_HINTS") ?? "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

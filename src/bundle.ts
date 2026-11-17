@@ -55,8 +55,8 @@ export function buildBundle(): void {
     outfile: temporary,
     logLevel: "warning",
   });
+  fs.chmodSync(temporary, 0o755);
   fs.renameSync(temporary, bundlePath);
-  fs.chmodSync(bundlePath, 0o755);
 }
 
 // Command that renders one graph: `<command> ...args <input> [output]`.

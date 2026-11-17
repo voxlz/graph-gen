@@ -53,9 +53,129 @@ describe("wrapLabel", () => {
 });
 
 describe("renderGraph", () => {
+  it.each(["legacy", "both"])(
+    "supports %s environment variable names for layout and dumps",
+    async (mode) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "graph-gen-env-"),
+      );
+      const keys = [
+        "GRAPHGEN_LAYOUT",
+        "GRAPHGEN_DUMP",
+        "GRAPH_GEN_LAYOUT",
+        "GRAPH_GEN_DUMP",
+      ] as const;
+      const previous = keys.map((key) => process.env[key]);
+      const legacyDump = path.join(directory, "legacy.json");
+      const newDump = path.join(directory, "new.json");
+      process.env.GRAPHGEN_LAYOUT = "constraint";
+      process.env.GRAPHGEN_DUMP = legacyDump;
+      delete process.env.GRAPH_GEN_LAYOUT;
+      delete process.env.GRAPH_GEN_DUMP;
+      if (mode === "both") {
+        process.env.GRAPH_GEN_LAYOUT = "curved";
+        process.env.GRAPH_GEN_DUMP = newDump;
+      }
+      try {
+        await renderGraph(emptyGraphSpec(), path.join(directory, "render.png"));
+        const dump = mode === "both" ? newDump : legacyDump;
+        expect(JSON.parse(fs.readFileSync(dump, "utf8")).meta.layout).toBe(
+          mode === "both" ? "curved" : "constraint",
+        );
+        if (mode === "both") expect(fs.existsSync(legacyDump)).toBe(false);
+      } finally {
+        keys.forEach((key, index) => {
+          if (previous[index] === undefined) delete process.env[key];
+          else process.env[key] = previous[index];
+        });
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+
+  it.each([
+    ["curved", "circle"],
+    ["constraint", "circle"],
+    ["curved", "database"],
+    ["constraint", "database"],
+  ])(
+    "connects diagonal edges to a wide %s-mode %s node",
+    async (layout, shape) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "graph-gen-rounded-edges-"),
+      );
+      const previousLayout = process.env.GRAPH_GEN_LAYOUT;
+      const previousDump = process.env.GRAPH_GEN_DUMP;
+      const dumpPath = path.join(directory, "dump.json");
+      process.env.GRAPH_GEN_LAYOUT = layout;
+      process.env.GRAPH_GEN_DUMP = dumpPath;
+      try {
+        const { spec } = parseGraphText(
+          fs.readFileSync(
+            path.join(__dirname, "../demo/showcase/compass.ggn"),
+            "utf8",
+          ),
+        );
+        const centerNode = spec.nodes.find((node) => node.id === "center")!;
+        centerNode.label = "A much wider center node";
+        centerNode.shape = shape;
+        await renderGraph(spec, path.join(directory, "render.png"));
+        const dump: {
+          nodes: Array<{
+            id: string;
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+          }>;
+          edges: Array<{
+            source: string;
+            target: string;
+            points: Array<{ x: number; y: number }>;
+          }>;
+        } = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
+        const center = dump.nodes.find((node) => node.id === "center")!;
+        expect(center.width).toBeGreaterThan(center.height);
+        const diagonalEdges = dump.edges.filter(
+          (edge) =>
+            edge.source === "center" &&
+            ["nw", "ne", "sw", "se"].includes(edge.target),
+        );
+        expect(diagonalEdges).toHaveLength(4);
+        for (const edge of diagonalEdges) {
+          const point = edge.points[0];
+          const x = Math.abs(point.x - center.x);
+          const y = Math.abs(point.y - center.y);
+          if (shape === "circle") {
+            const radius = center.height / 2;
+            const cornerX = Math.max(0, x - (center.width / 2 - radius));
+            expect(Math.hypot(cornerX, y)).toBeCloseTo(radius, 3);
+          } else {
+            const ry = Math.min(center.height * 0.16, center.width * 0.225);
+            const capY = Math.max(0, y - (center.height / 2 - ry));
+            if (capY === 0) expect(x).toBeCloseTo(center.width / 2, 3);
+            else {
+              expect(
+                (x / (center.width / 2)) ** 2 + (capY / ry) ** 2,
+              ).toBeCloseTo(1, 3);
+            }
+          }
+        }
+      } finally {
+        if (previousLayout === undefined) delete process.env.GRAPH_GEN_LAYOUT;
+        else process.env.GRAPH_GEN_LAYOUT = previousLayout;
+        if (previousDump === undefined) delete process.env.GRAPH_GEN_DUMP;
+        else process.env.GRAPH_GEN_DUMP = previousDump;
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+
   it("keeps the Weather API to Redis route simple without backtracking", () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-weather-scope-"),
+      path.join(os.tmpdir(), "graph-gen-weather-scope-"),
     );
     const dumpPath = path.join(directory, "dump.json");
     try {
@@ -69,9 +189,9 @@ describe("renderGraph", () => {
         {
           env: {
             ...process.env,
-            GRAPHGEN_LAYOUT: "orthogonal",
-            GRAPHGEN_LABEL_NODES: "auto",
-            GRAPHGEN_DUMP: dumpPath,
+            GRAPH_GEN_LAYOUT: "orthogonal",
+            GRAPH_GEN_LABEL_NODES: "auto",
+            GRAPH_GEN_DUMP: dumpPath,
           },
           stdio: "pipe",
         },
@@ -127,12 +247,12 @@ describe("renderGraph", () => {
     "keeps group titles clear of nodes, edges and labels in %s mode",
     async (layout) => {
       const directory = fs.mkdtempSync(
-        path.join(os.tmpdir(), "graphgen-group-labels-"),
+        path.join(os.tmpdir(), "graph-gen-group-labels-"),
       );
-      const previousLayout = process.env.GRAPHGEN_LAYOUT;
-      const previousDump = process.env.GRAPHGEN_DUMP;
-      process.env.GRAPHGEN_LAYOUT = layout;
-      process.env.GRAPHGEN_DUMP = path.join(directory, "dump.json");
+      const previousLayout = process.env.GRAPH_GEN_LAYOUT;
+      const previousDump = process.env.GRAPH_GEN_DUMP;
+      process.env.GRAPH_GEN_LAYOUT = layout;
+      process.env.GRAPH_GEN_DUMP = path.join(directory, "dump.json");
       try {
         const spec = emptyGraphSpec();
         spec.graph.boundaryPad = 0;
@@ -170,7 +290,7 @@ describe("renderGraph", () => {
           groups: Array<{ id: string; rect: Box; label: Box | null }>;
           edges: Array<{ points: Array<{ x: number; y: number }> }>;
           labels: Box[];
-        } = JSON.parse(fs.readFileSync(process.env.GRAPHGEN_DUMP, "utf8"));
+        } = JSON.parse(fs.readFileSync(process.env.GRAPH_GEN_DUMP, "utf8"));
         const titles = dump.groups.flatMap((group) =>
           group.label ? [group.label] : [],
         );
@@ -208,10 +328,10 @@ describe("renderGraph", () => {
           }
         }
       } finally {
-        if (previousLayout === undefined) delete process.env.GRAPHGEN_LAYOUT;
-        else process.env.GRAPHGEN_LAYOUT = previousLayout;
-        if (previousDump === undefined) delete process.env.GRAPHGEN_DUMP;
-        else process.env.GRAPHGEN_DUMP = previousDump;
+        if (previousLayout === undefined) delete process.env.GRAPH_GEN_LAYOUT;
+        else process.env.GRAPH_GEN_LAYOUT = previousLayout;
+        if (previousDump === undefined) delete process.env.GRAPH_GEN_DUMP;
+        else process.env.GRAPH_GEN_DUMP = previousDump;
         fs.rmSync(directory, { recursive: true, force: true });
       }
     },
@@ -220,7 +340,7 @@ describe("renderGraph", () => {
 
   it("writes a PNG for an empty graph", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-"),
+      path.join(os.tmpdir(), "graph-gen-render-"),
     );
     const output = path.join(directory, "graph.png");
 
@@ -237,14 +357,14 @@ describe("renderGraph", () => {
 
   it("uses the curved layout by default", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-curved-default-"),
+      path.join(os.tmpdir(), "graph-gen-render-curved-default-"),
     );
     const output = path.join(directory, "graph.png");
     const dump = path.join(directory, "dump.json");
-    const previousLayout = process.env.GRAPHGEN_LAYOUT;
-    const previousDump = process.env.GRAPHGEN_DUMP;
-    delete process.env.GRAPHGEN_LAYOUT;
-    process.env.GRAPHGEN_DUMP = dump;
+    const previousLayout = process.env.GRAPH_GEN_LAYOUT;
+    const previousDump = process.env.GRAPH_GEN_DUMP;
+    delete process.env.GRAPH_GEN_LAYOUT;
+    process.env.GRAPH_GEN_DUMP = dump;
 
     try {
       await renderGraph(emptyGraphSpec(), output);
@@ -254,8 +374,8 @@ describe("renderGraph", () => {
       );
     } finally {
       for (const [key, value] of [
-        ["GRAPHGEN_LAYOUT", previousLayout],
-        ["GRAPHGEN_DUMP", previousDump],
+        ["GRAPH_GEN_LAYOUT", previousLayout],
+        ["GRAPH_GEN_DUMP", previousDump],
       ] as const) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
@@ -266,7 +386,7 @@ describe("renderGraph", () => {
 
   it("renders a graph with the force layout strategy", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-force-"),
+      path.join(os.tmpdir(), "graph-gen-render-force-"),
     );
     const output = path.join(directory, "graph.png");
     const spec = emptyGraphSpec();
@@ -292,14 +412,14 @@ describe("renderGraph", () => {
     "keeps orthogonal bends visible and clear connections straight: %s",
     async (name) => {
       const directory = fs.mkdtempSync(
-        path.join(os.tmpdir(), "graphgen-orthogonal-"),
+        path.join(os.tmpdir(), "graph-gen-orthogonal-"),
       );
 
       const dumpPath = path.join(directory, "dump.json");
-      const previousLayout = process.env.GRAPHGEN_LAYOUT;
-      const previousDump = process.env.GRAPHGEN_DUMP;
-      process.env.GRAPHGEN_LAYOUT = "orthogonal";
-      process.env.GRAPHGEN_DUMP = dumpPath;
+      const previousLayout = process.env.GRAPH_GEN_LAYOUT;
+      const previousDump = process.env.GRAPH_GEN_DUMP;
+      process.env.GRAPH_GEN_LAYOUT = "orthogonal";
+      process.env.GRAPH_GEN_DUMP = dumpPath;
       try {
         const { spec } = parseGraphText(
           fs.readFileSync(
@@ -354,8 +474,8 @@ describe("renderGraph", () => {
         }
       } finally {
         for (const [key, value] of [
-          ["GRAPHGEN_LAYOUT", previousLayout],
-          ["GRAPHGEN_DUMP", previousDump],
+          ["GRAPH_GEN_LAYOUT", previousLayout],
+          ["GRAPH_GEN_DUMP", previousDump],
         ] as const) {
           if (value === undefined) delete process.env[key];
           else process.env[key] = value;
@@ -368,7 +488,7 @@ describe("renderGraph", () => {
 
   it("compacts bookstore providers while keeping orthogonal labels and routes clear", () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-bookstore-"),
+      path.join(os.tmpdir(), "graph-gen-bookstore-"),
     );
     const dumpPath = path.join(directory, "dump.json");
     try {
@@ -382,9 +502,9 @@ describe("renderGraph", () => {
         {
           env: {
             ...process.env,
-            GRAPHGEN_LAYOUT: "orthogonal",
-            GRAPHGEN_LABEL_NODES: "auto",
-            GRAPHGEN_DUMP: dumpPath,
+            GRAPH_GEN_LAYOUT: "orthogonal",
+            GRAPH_GEN_LABEL_NODES: "auto",
+            GRAPH_GEN_DUMP: dumpPath,
           },
           encoding: "utf8",
           stdio: "pipe",
@@ -516,7 +636,7 @@ describe("renderGraph", () => {
 
   it("compacts disconnected weather nodes with automatic label nodes", () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-weather-"),
+      path.join(os.tmpdir(), "graph-gen-weather-"),
     );
     const dumpPath = path.join(directory, "dump.json");
     try {
@@ -531,9 +651,9 @@ describe("renderGraph", () => {
           encoding: "utf8",
           env: {
             ...process.env,
-            GRAPHGEN_LAYOUT: "orthogonal",
-            GRAPHGEN_LABEL_NODES: "auto",
-            GRAPHGEN_DUMP: dumpPath,
+            GRAPH_GEN_LAYOUT: "orthogonal",
+            GRAPH_GEN_LABEL_NODES: "auto",
+            GRAPH_GEN_DUMP: dumpPath,
           },
         },
       );
@@ -617,17 +737,17 @@ describe("renderGraph", () => {
     "respects the orthogonal label-node setting (%s)",
     async (setting) => {
       const directory = fs.mkdtempSync(
-        path.join(os.tmpdir(), "graphgen-label-node-"),
+        path.join(os.tmpdir(), "graph-gen-label-node-"),
       );
       const dumpPath = path.join(directory, "dump.json");
       const previous = {
-        layout: process.env.GRAPHGEN_LAYOUT,
-        labelNodes: process.env.GRAPHGEN_LABEL_NODES,
-        dump: process.env.GRAPHGEN_DUMP,
+        layout: process.env.GRAPH_GEN_LAYOUT,
+        labelNodes: process.env.GRAPH_GEN_LABEL_NODES,
+        dump: process.env.GRAPH_GEN_DUMP,
       };
-      process.env.GRAPHGEN_LAYOUT = "orthogonal";
-      process.env.GRAPHGEN_LABEL_NODES = setting;
-      process.env.GRAPHGEN_DUMP = dumpPath;
+      process.env.GRAPH_GEN_LAYOUT = "orthogonal";
+      process.env.GRAPH_GEN_LABEL_NODES = setting;
+      process.env.GRAPH_GEN_DUMP = dumpPath;
       const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
       try {
         const spec = emptyGraphSpec();
@@ -688,9 +808,9 @@ describe("renderGraph", () => {
       } finally {
         warn.mockRestore();
         for (const [key, value] of [
-          ["GRAPHGEN_LAYOUT", previous.layout],
-          ["GRAPHGEN_LABEL_NODES", previous.labelNodes],
-          ["GRAPHGEN_DUMP", previous.dump],
+          ["GRAPH_GEN_LAYOUT", previous.layout],
+          ["GRAPH_GEN_LABEL_NODES", previous.labelNodes],
+          ["GRAPH_GEN_DUMP", previous.dump],
         ] as const) {
           if (value === undefined) delete process.env[key];
           else process.env[key] = value;
@@ -754,7 +874,7 @@ describe("renderGraph", () => {
 
   it("writes an error PNG with the supplied diagnostics", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-"),
+      path.join(os.tmpdir(), "graph-gen-render-"),
     );
     const output = path.join(directory, "error.png");
 
@@ -774,7 +894,7 @@ describe("renderGraph", () => {
 
   it("preserves each diagnostic context line in the PNG", async () => {
     const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "graphgen-render-"),
+      path.join(os.tmpdir(), "graph-gen-render-"),
     );
     const output = path.join(directory, "context.png");
 

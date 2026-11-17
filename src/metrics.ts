@@ -1,4 +1,4 @@
-// metrics.ts — measures a rendered graph from its layout dump (GRAPHGEN_DUMP):
+// metrics.ts — measures a rendered graph from its layout dump (GRAPH_GEN_DUMP):
 // area, drawn edge lengths, crossings, edges through nodes, label collisions,
 // overlapping edges and bends. Shared by the benchmark and improve-rules.
 
@@ -260,7 +260,7 @@ export function metricsFromDump(dump: any) {
 }
 
 // Renders one graph in a child process (so engines can't affect each other)
-// and measures the result from its image and GRAPHGEN_DUMP layout dump.
+// and measures the result from its image and GRAPH_GEN_DUMP layout dump.
 export function renderAndMeasure(
   file: string,
   image: string,
@@ -279,7 +279,7 @@ export function renderAndMeasure(
         env: {
           ...process.env,
           ...env,
-          GRAPHGEN_DUMP: dumpFile,
+          GRAPH_GEN_DUMP: dumpFile,
         },
         maxBuffer: 64 * 1024 * 1024,
       },

@@ -130,7 +130,7 @@ for (const input of inputs) {
     execFileSync(renderer.command, [...renderer.args, input, output], {
       stdio: "inherit",
       cwd: rootDir,
-      env: { ...process.env, GRAPHGEN_LAYOUT: layout },
+      env: { ...process.env, GRAPH_GEN_LAYOUT: layout },
     });
   }
   cache[input] = inputFingerprint;

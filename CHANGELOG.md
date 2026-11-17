@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the project to `graph-gen` and environment variables to
+  `GRAPH_GEN_*`; the previous `GRAPHGEN_*` variables remain supported.
+- Edges and arrowheads connect to rounded node and cylinder outlines instead
+  of stopping at their rectangular bounds.
+
 ## v4.5.2
 
 - Published the npm package as `@voxlz/graph-gen` because npm rejects the
@@ -65,7 +72,7 @@
   clearance from nodes and stay clear of other labels and edges.
 - With `curved`, an edge whose label has no room beside it bends to reach the
   label, without moving any node.
-- New `labelNodes` graph setting (`GRAPHGEN_LABEL_NODES`): with `curved`,
+- New `labelNodes` graph setting (`GRAPH_GEN_LABEL_NODES`): with `curved`,
   labels that still can't touch their edge, or that would stick out of the
   layout, are laid out as nodes that push other nodes away and have their edge
   routed through them. `auto` (default) does this only for those labels,
@@ -78,7 +85,7 @@
 
 ## v4.1.0
 
-- New `--watch` (`-w`) flag: `graphgen --watch [path] [output-directory]`
+- New `--watch` (`-w`) flag: `graph-gen --watch [path] [output-directory]`
   re-renders graphs on save, also from the Docker image.
 - New `--help` (`-h`) and `--version` (`-v`) flags. Unknown options now fail
   with exit code 2.
@@ -86,7 +93,7 @@
 ## v4.0.0
 
 - **Breaking:** `curved` is the new default layout engine (was `cola`). Set
-  `graph.layout "cola"` or `GRAPHGEN_LAYOUT=cola` to keep the old layouts.
+  `graph.layout "cola"` or `GRAPH_GEN_LAYOUT=cola` to keep the old layouts.
 - New `curved` engine: each edge is one smooth curve routed around nodes and
   boundaries, so edges never cross each other or pass through nodes and labels
   sit beside their edge. Layouts are about 15% smaller than Cola's on average.
@@ -103,7 +110,7 @@
 ## v3.0.5
 
 - Make Cola the default layout engine; `constraint` and `force` remain available
-  through `graph.layout` or `GRAPHGEN_LAYOUT`.
+  through `graph.layout` or `GRAPH_GEN_LAYOUT`.
 
 ## v3.0.3
 

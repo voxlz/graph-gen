@@ -1,4 +1,4 @@
-// verify.ts — programmatic checks on a layout dump produced via GRAPHGEN_DUMP.
+// verify.ts — programmatic checks on a layout dump produced via GRAPH_GEN_DUMP.
 // Usage: tsx src/verify.ts <dump.json> [rulesFile.ggn-or-json]
 //
 // Checks:
