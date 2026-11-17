@@ -1537,9 +1537,18 @@ export async function renderGraph(
         candidate.labels,
       );
     }
+    const groupArea = (rects: LayoutCandidate["result"]["groups"]) =>
+      [...rects.values()].reduce(
+        (total, rect) =>
+          total + (rect.maxX - rect.minX) * (rect.maxY - rect.minY),
+        0,
+      );
     const kept =
       after.crossings + after.hitEdges.length <=
         before.crossings + before.hitEdges.length &&
+      (edgeRouting !== "orthogonal" ||
+        groupArea(candidate.result.groups) <=
+          groupArea(start.result.groups) + 1e-6) &&
       after.value <= before.value + 1e-9;
     restoreCandidate(nodes, links, kept ? candidate : start);
     return kept ? candidate : start;

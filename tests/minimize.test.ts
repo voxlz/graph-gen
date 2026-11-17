@@ -42,12 +42,20 @@ test("minimizeLayout retains angular relaxation through its strategy cycle", () 
   expect(strategyCase.options.isValid(true)).toBe(true);
 });
 
-test("minimizeLayout runs node and boundary swaps before geometry stages", () => {
+test("minimizeLayout runs swaps before other geometry stages", () => {
   const strategyCase = createStrategyCase("node-swap-boundary");
 
   minimizeLayout(strategyCase.options);
 
-  expect(strategyCase.frames[0]?.strategy).toBe("node-swap");
+  const swapIndex = strategyCase.frames.findIndex(
+    (frame) => frame.strategy === "node-swap",
+  );
+  expect(swapIndex).toBeGreaterThanOrEqual(0);
+  expect(
+    strategyCase.frames
+      .slice(0, swapIndex)
+      .every((frame) => frame.strategy === "disconnected-perimeter"),
+  ).toBe(true);
   expect(strategyCase.options.isValid(true)).toBe(true);
 });
 

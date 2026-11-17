@@ -88,9 +88,10 @@ describe("recursive rendering", () => {
         path.join(installed, file),
       );
     }
+    fs.mkdirSync(path.join(installed, "node_modules"));
     fs.symlinkSync(
-      path.resolve(__dirname, "../node_modules"),
-      path.join(installed, "node_modules"),
+      path.dirname(require.resolve("canvas/package.json")),
+      path.join(installed, "node_modules", "canvas"),
       "dir",
     );
     const graphs = path.join(directory, "graphs");

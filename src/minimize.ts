@@ -63,6 +63,10 @@ export function minimizeLayout(options: MinimizeOptions): void {
     const initialMaximumArea = baselineScore.area * 1.05;
     const preservesElementArea = options.elementAreaScore !== undefined;
     if (preservesElementArea) {
+      // Move disconnected nodes first so they do not block later compaction.
+      runAreaPreserving((stageOptions) =>
+        minimizeDisconnectedPerimeter(stageOptions, initialMaximumArea),
+      );
       runAreaPreserving((stageOptions) =>
         minimizeNodeSwaps(stageOptions, initialMaximumArea, "boundary-only"),
       );

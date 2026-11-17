@@ -90,6 +90,8 @@ The unscoped npm name `graphgen` belongs to a different project; use
 The npm package includes the compiled CLI and default styles. Rendering uses
 `canvas`: supported platforms use prebuilt native binaries; other platforms
 need its [native build prerequisites](https://github.com/Automattic/node-canvas#compiling).
+Text uses the system sans-serif font, so measurements and layouts can vary
+between systems.
 Docker remains available if you prefer not to install native dependencies.
 
 ## Install and run (Docker)

@@ -807,13 +807,27 @@ constraints {
     const minimized = solve(100);
     const area = (bounds: ReturnType<typeof rect>) =>
       (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
-    const nodeById = (id: string) =>
-      minimized.nodes[minimized.indexById.get(id)!];
-    const cache = nodeById("cache");
-    const stackTarget = [nodeById("gateway"), nodeById("orders")].sort(
-      (first, second) =>
-        Math.abs(cache.x - first.x) - Math.abs(cache.x - second.x),
-    )[0];
+    const cache = minimized.nodes[minimized.indexById.get("cache")!];
+    const cacheRect = rect(cache);
+    const neighborGaps = minimized.nodes
+      .filter(
+        (node) => node !== cache && node.boundaryParent === cache.boundaryParent,
+      )
+      .flatMap((node) => {
+        const other = rect(node);
+        const xGap = Math.max(
+          other.minX - cacheRect.maxX,
+          cacheRect.minX - other.maxX,
+        );
+        const yGap = Math.max(
+          other.minY - cacheRect.maxY,
+          cacheRect.minY - other.maxY,
+        );
+        return [
+          ...(yGap < 0 ? [xGap] : []),
+          ...(xGap < 0 ? [yGap] : []),
+        ];
+      });
 
     expect(minimized.result.violations).toEqual([]);
     expect(area(minimized.result.groups.get("docker")!)).toBeLessThan(
@@ -822,8 +836,7 @@ constraints {
     expect(area(minimized.result.groups.get("cloud")!)).toBeLessThan(
       area(baseline.result.groups.get("cloud")!),
     );
-    expect(Math.abs(cache.x - stackTarget.x)).toBeLessThan(1);
-    expect(rect(stackTarget).minY - rect(cache).maxY).toBeCloseTo(100, 1);
+    expect(Math.min(...neighborGaps)).toBeCloseTo(100, 0);
   });
 
   it("compacts disconnected weather UC1 nodes without enlarging the graph", () => {

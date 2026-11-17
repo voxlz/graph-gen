@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { segmentHitsBox } from "../src/routing";
+import { segmentHitsBox, type Box } from "../src/routing";
 import { emptyGraphSpec, parseGraphText } from "../src/parse";
 import {
   formatEdgeLabel,
@@ -11,6 +11,29 @@ import {
   renderGraph,
   wrapLabel,
 } from "../src/render";
+
+function hasClearance(
+  box: Box,
+  node: { x: number; y: number; width: number; height: number },
+  clearance: number,
+): boolean {
+  const atMost = (a: number, b: number) => a <= b + 1e-6;
+  return (
+    atMost(box.maxX, node.x - node.width / 2 - clearance) ||
+    atMost(node.x + node.width / 2 + clearance, box.minX) ||
+    atMost(box.maxY, node.y - node.height / 2 - clearance) ||
+    atMost(node.y + node.height / 2 + clearance, box.minY)
+  );
+}
+
+it("allows rounding at the clearance boundary but rejects real overlap", () => {
+  const node = { x: 0, y: 90.67603357703835, width: 2, height: 100 };
+  const label = { minX: -1, maxX: 1, minY: 0, maxY: 24.676033577038368 };
+  expect(hasClearance(label, node, 16)).toBe(true);
+  expect(hasClearance({ ...label, maxY: label.maxY + 0.001 }, node, 16)).toBe(
+    false,
+  );
+});
 
 describe("wrapLabel", () => {
   // One unit per character, so widths are easy to reason about.
@@ -552,12 +575,7 @@ describe("renderGraph", () => {
       }
       for (const label of dump.labels) {
         for (const node of dump.nodes) {
-          expect(
-            label.maxX <= node.x - node.width / 2 - 16 ||
-              label.minX >= node.x + node.width / 2 + 16 ||
-              label.maxY <= node.y - node.height / 2 - 16 ||
-              label.minY >= node.y + node.height / 2 + 16,
-          ).toBe(true);
+          expect(hasClearance(label, node, 16)).toBe(true);
         }
         for (const other of dump.edges) {
           for (const bend of other.points.slice(1, -1)) {

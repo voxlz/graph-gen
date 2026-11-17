@@ -10,10 +10,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json ./
+COPY package.json package-lock.json ./
 # Skip lifecycle scripts (e.g. husky prepare) and rebuild canvas explicitly so
 # native bindings are always present in the final image.
-RUN npm install --omit=dev --ignore-scripts && npm rebuild canvas --build-from-source
+RUN npm ci --ignore-scripts && npm rebuild canvas --build-from-source
 COPY src ./src
 COPY style.jsonc ./
 COPY demo ./demo

@@ -1,5 +1,13 @@
 # Changelog
 
+## v4.5.1
+
+- Improved compaction of disconnected nodes and prevented orthogonal
+  compaction from increasing the combined area of groups.
+- Made the weather label-clearance test tolerant of floating-point rounding.
+- Reduced npm installation dependencies; build tools are no longer required
+  by the published CLI.
+
 ## v4.5.0
 
 - Added `-r` / `--recursive [path]` to regenerate every `.ggn` file under a
