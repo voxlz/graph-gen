@@ -26,6 +26,8 @@ export interface RouteNode {
   y: number;
   width: number;
   height: number;
+  borderRadius?: number;
+  outline?: "cylinder";
 }
 
 export interface RouteEdge {
@@ -99,6 +101,89 @@ function strictlyInside(p: Pt, box: Box): boolean {
     p.y > box.minY + EPS &&
     p.y < box.maxY - EPS
   );
+}
+
+function insideNode(p: Pt, node: RouteNode): boolean {
+  const hw = node.width / 2;
+  const hh = node.height / 2;
+  const radius = Math.max(0, Math.min(node.borderRadius ?? 0, hw, hh));
+  const x = Math.abs(p.x - node.x);
+  const y = Math.abs(p.y - node.y);
+  if (x > hw || y > hh) return false;
+  if (node.outline === "cylinder") {
+    const ry = Math.min(node.height * 0.16, hw * 0.45);
+    const capY = Math.max(0, y - (hh - ry));
+    return (x / hw) ** 2 + (capY / ry) ** 2 <= 1 || capY === 0;
+  }
+  const cornerX = Math.max(0, x - (hw - radius));
+  const cornerY = Math.max(0, y - (hh - radius));
+  return cornerX * cornerX + cornerY * cornerY <= radius * radius;
+}
+
+// Find the outline between a point inside the node and a point outside it.
+function nodeExit(node: RouteNode, inside: Pt, outside: Pt): Pt {
+  for (let i = 0; i < 40; i++) {
+    const mid = {
+      x: (inside.x + outside.x) / 2,
+      y: (inside.y + outside.y) / 2,
+    };
+    if (insideNode(mid, node)) inside = mid;
+    else outside = mid;
+  }
+  return inside;
+}
+
+export function nodeBoundaryPoint(node: RouteNode, toward: Pt): Pt {
+  const dx = toward.x - node.x;
+  const dy = toward.y - node.y;
+  if (dx === 0 && dy === 0) return { x: node.x, y: node.y };
+  const scale = Math.min(
+    dx === 0 ? Infinity : node.width / 2 / Math.abs(dx),
+    dy === 0 ? Infinity : node.height / 2 / Math.abs(dy),
+  );
+  const outside = { x: node.x + dx * scale, y: node.y + dy * scale };
+  return nodeExit(node, node, outside);
+}
+
+// Orthogonal routing uses rectangular bounds while searching; extend its final
+// endpoint along the same segment to reach the actual rounded outline.
+export function clipOrthogonalToNodeShapes(
+  route: EdgeRoute,
+  source: RouteNode,
+  target: RouteNode,
+): EdgeRoute {
+  const points = route.points.slice();
+  if (points.length < 2) return route;
+  if (
+    points.length === 2 &&
+    Math.hypot(points[0].x - source.x, points[0].y - source.y) < EPS &&
+    Math.hypot(points[1].x - target.x, points[1].y - target.y) < EPS
+  ) {
+    return {
+      ...route,
+      points: [
+        nodeBoundaryPoint(source, target),
+        nodeBoundaryPoint(target, source),
+      ],
+    };
+  }
+  const clip = (index: number, next: number, node: RouteNode) => {
+    const p = points[index];
+    const q = points[next];
+    if (insideNode(p, node)) return;
+    const inside =
+      Math.abs(p.x - q.x) < EPS
+        ? { x: p.x, y: node.y }
+        : Math.abs(p.y - q.y) < EPS
+          ? { x: node.x, y: p.y }
+          : null;
+    if (inside && insideNode(inside, node)) {
+      points[index] = nodeExit(node, inside, p);
+    }
+  };
+  clip(0, 1, source);
+  clip(points.length - 1, points.length - 2, target);
+  return { ...route, points };
 }
 
 function boxesOverlap(a: Box, b: Box): boolean {
@@ -284,15 +369,21 @@ function quadAt(p0: Pt, c: Pt, p2: Pt, t: number): Pt {
   };
 }
 
-// Parameter where the curve crosses the border of `box` (which contains the
+// Parameter where the curve crosses the node outline (which contains the
 // start when fromStart, otherwise the end).
-function exitParameter(p0: Pt, c: Pt, p2: Pt, box: Box, fromStart: boolean) {
+function exitParameter(
+  p0: Pt,
+  c: Pt,
+  p2: Pt,
+  node: RouteNode,
+  fromStart: boolean,
+) {
   let inside = fromStart ? 0 : 1;
   let outside = fromStart ? 1 : 0;
-  if (strictlyInside(quadAt(p0, c, p2, outside), box)) return inside;
+  if (insideNode(quadAt(p0, c, p2, outside), node)) return inside;
   for (let i = 0; i < 30; i++) {
     const mid = (inside + outside) / 2;
-    if (strictlyInside(quadAt(p0, c, p2, mid), box)) inside = mid;
+    if (insideNode(quadAt(p0, c, p2, mid), node)) inside = mid;
     else outside = mid;
   }
   return outside;
@@ -316,8 +407,8 @@ function curveRoute(
 ): EdgeRoute {
   const p0 = { x: source.x, y: source.y };
   const p2 = { x: target.x, y: target.y };
-  const t0 = exitParameter(p0, control, p2, nodeBox(source), true);
-  const t1 = exitParameter(p0, control, p2, nodeBox(target), false);
+  const t0 = exitParameter(p0, control, p2, source, true);
+  const t1 = exitParameter(p0, control, p2, target, false);
   const curve = subCurve(p0, control, p2, t0, Math.max(t0, t1));
   const points: Pt[] = [];
   const samples = 16;

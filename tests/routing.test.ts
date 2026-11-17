@@ -1,6 +1,8 @@
 import {
   bendToLabels,
   bendOrthogonalToLabels,
+  clipOrthogonalToNodeShapes,
+  nodeBoundaryPoint,
   placeRouteLabels,
   routeCurved,
   routeOrthogonal,
@@ -27,7 +29,83 @@ function hitsMiddle(points: Array<{ x: number; y: number }>) {
   return points.slice(1).some((p, i) => segmentHitsBox(points[i], p, middle));
 }
 
+describe("rounded node endpoints", () => {
+  const node = { x: 0, y: 0, width: 120, height: 60, borderRadius: 30 };
+
+  it("clips diagonal straight edges to the rounded outline", () => {
+    const point = nodeBoundaryPoint(node, { x: 200, y: 100 });
+    expect(point.x).toBeCloseTo(48);
+    expect(point.y).toBeCloseTo(24);
+  });
+
+  it("extends orthogonal endpoints without changing their direction", () => {
+    const route = {
+      points: [
+        { x: 60, y: 25 },
+        { x: 150, y: 25 },
+        { x: 150, y: 200 },
+      ],
+    };
+    const target = { x: 150, y: 230, width: 60, height: 60 };
+    const clipped = clipOrthogonalToNodeShapes(route, node, target);
+    expect(clipped.points[0].x).toBeCloseTo(30 + Math.sqrt(275));
+    expect(clipped.points[0].y).toBe(25);
+    expect(clipped.points.slice(1)).toEqual(route.points.slice(1));
+  });
+
+  it("clips both ends of a centre-to-centre orthogonal fallback", () => {
+    const target = { x: 200, y: 100, width: 60, height: 60, borderRadius: 30 };
+    const clipped = clipOrthogonalToNodeShapes(
+      {
+        points: [
+          { x: 0, y: 0 },
+          { x: 200, y: 100 },
+        ],
+      },
+      node,
+      target,
+    );
+    expect(clipped.points[0].x).toBeCloseTo(48);
+    expect(
+      Math.hypot(
+        clipped.points[1].x - target.x,
+        clipped.points[1].y - target.y,
+      ),
+    ).toBeCloseTo(30);
+  });
+
+  it("clips diagonal edges to a cylinder's elliptical cap", () => {
+    const cylinder = { ...node, outline: "cylinder" as const };
+    const point = nodeBoundaryPoint(cylinder, { x: 200, y: 100 });
+    const rx = cylinder.width / 2;
+    const ry = cylinder.height * 0.16;
+    const capY = point.y - (cylinder.height / 2 - ry);
+    expect(capY).toBeGreaterThan(0);
+    expect((point.x / rx) ** 2 + (capY / ry) ** 2).toBeCloseTo(1);
+  });
+});
+
 describe("routeCurved", () => {
+  it("clips both ends of a curve to rounded outlines", () => {
+    const nodes = [
+      { x: 0, y: 0, width: 120, height: 60, borderRadius: 30 },
+      { x: 200, y: 100, width: 60, height: 60, borderRadius: 30 },
+    ];
+    const [route] = routeCurved({
+      nodes,
+      edges: [{ source: 0, target: 1 }],
+      groups: [],
+      clearance: 8,
+    });
+    expect(route.curve!.p0.x).toBeCloseTo(48, 4);
+    expect(route.curve!.p0.y).toBeCloseTo(24, 4);
+    expect(
+      Math.hypot(route.curve!.p2.x - 200, route.curve!.p2.y - 100),
+    ).toBeCloseTo(30, 4);
+    expect(route.points[0]).toEqual(route.curve!.p0);
+    expect(route.points[route.points.length - 1]).toEqual(route.curve!.p2);
+  });
+
   it("bends a single curve around a node in the way", () => {
     const [route] = routeCurved(blocked);
     expect(route.curve).toBeDefined();

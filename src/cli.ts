@@ -14,18 +14,18 @@ export function packageVersion(): string {
 }
 
 export function helpText(version: string): string {
-  return `graphgen ${version} — render .ggn graph files to PNG
+  return `graph-gen ${version} — render .ggn graph files to PNG
 
 Usage:
-  graphgen <input.ggn|input.json> [output.png] [style.jsonc]
-  graphgen --watch [path] [output-directory]
-  graphgen --help | --version
+  graph-gen <input.ggn|input.json> [output.png] [style.jsonc]
+  graph-gen --watch [path] [output-directory]
+  graph-gen --help | --version
 
 Arguments:
   input         Graph to render (.ggn DSL or parsed .json).
   output        PNG to write. Default: the graph's outputPath setting, else
                 ../graphs/<name>.png relative to the input file.
-  style         Global style file. Default: style.jsonc next to graphgen.
+  style         Global style file. Default: style.jsonc next to graph-gen.
 
 Options:
   -w, --watch    Watch a .ggn file or folder (default: current folder) and
@@ -35,12 +35,13 @@ Options:
   -v, --version  Print the version and exit.
 
 Environment:
-  GRAPHGEN_LAYOUT            Layout engine: curved (default), orthogonal,
-                             constraint, cola or force.
-  GRAPHGEN_CONSTRAINT_HINTS  Set to 1 to report rules that block a smaller
-                             layout.
-  GRAPHGEN_DUMP              Write node positions and edge paths as JSON to
-                             this file.
+  GRAPH_GEN_LAYOUT            Layout engine: curved (default), orthogonal,
+                              constraint, cola or force.
+  GRAPH_GEN_CONSTRAINT_HINTS  Set to 1 to report rules that block a smaller
+                              layout.
+  GRAPH_GEN_DUMP              Write node positions and edge paths as JSON to
+                              this file.
+  The deprecated GRAPHGEN_* names are also accepted.
 `;
 }
 
@@ -63,7 +64,7 @@ export function handleInfoFlags(
   }
   if (first?.startsWith("-") && first !== "-" && !isWatchFlag(first)) {
     return {
-      output: `graphgen: unknown option ${first}\n\n${helpText(version)}`,
+      output: `graph-gen: unknown option ${first}\n\n${helpText(version)}`,
       exitCode: 2,
       stream: "stderr",
     };

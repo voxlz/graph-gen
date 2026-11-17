@@ -7,7 +7,7 @@ flowchart TD
   parse --> spec[In-memory GraphSpec]
   spec --> validate[validate.ts]
   validate --> render[render.ts]
-  render --> engine{GRAPHGEN_LAYOUT}
+  render --> engine{GRAPH_GEN_LAYOUT}
   engine -->|constraint| seeds[Grid + WebCola seeds]
   engine -->|curved (default) / orthogonal| seeds
   seeds --> solve[solveLayout]

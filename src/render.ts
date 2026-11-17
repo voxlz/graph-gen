@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as cola from "webcola";
 import { applyForceLayout, DEFAULT_FORCE_LAYOUT } from "./force-layout";
+import { graphEnv } from "./env";
 import { createCanvas } from "canvas";
 import { stripComments, type GraphSpec } from "./parse";
 import {
@@ -18,8 +19,10 @@ import {
   beyond,
   bendToLabels,
   bendOrthogonalToLabels,
+  clipOrthogonalToNodeShapes,
   footprintOf,
   LABEL_NODE_CLEARANCE,
+  nodeBoundaryPoint,
   placeRouteLabels,
   routeTouchesLabel,
   obstacleHits,
@@ -492,7 +495,7 @@ export async function renderGraph(
     // labels that can't touch their edge otherwise; true always, false never.
     labelNodes: (() => {
       const value = String(
-        process.env.GRAPHGEN_LABEL_NODES ??
+        graphEnv("LABEL_NODES") ??
           spec.graph?.labelNodes ??
           globalStyle.graph?.labelNodes ??
           "auto",
@@ -510,32 +513,32 @@ export async function renderGraph(
     // the boundary nested inside it.
     nestPad: spec.graph?.nestPad ?? globalStyle.graph?.nestPad ?? 36,
     // WebCola solver iteration counts: [unconstrained, userConstraint,
-    // allConstraint]. Overridable via style or the GRAPHGEN_ITERS env var.
+    // allConstraint]. Overridable via style or the GRAPH_GEN_ITERS env var.
     iterations: spec.graph?.iterations ??
       globalStyle.graph?.iterations ?? [0, 100, 1000],
     layout: String(
-      process.env.GRAPHGEN_LAYOUT ??
+      graphEnv("LAYOUT") ??
         spec.graph?.layout ??
         globalStyle.graph?.layout ??
         "curved",
     ).toLowerCase(),
     layoutIterations: Number(
-      process.env.GRAPHGEN_LAYOUT_ITERS ??
+      graphEnv("LAYOUT_ITERS") ??
         spec.graph?.layoutIterations ??
         globalStyle.graph?.layoutIterations ??
         1000,
     ),
     debugFrameEvery: Number(
-      process.env.GRAPHGEN_DEBUG_FRAMES ??
+      graphEnv("DEBUG_FRAMES") ??
         spec.graph?.debugFrameEvery ??
         globalStyle.graph?.debugFrameEvery ??
         0,
     ),
     forceDebugFrameEvery: Number(
-      process.env.GRAPHGEN_FORCE_DEBUG_FRAMES ??
+      graphEnv("FORCE_DEBUG_FRAMES") ??
         spec.graph?.forceDebugFrameEvery ??
         globalStyle.graph?.forceDebugFrameEvery ??
-        process.env.GRAPHGEN_DEBUG_FRAMES ??
+        graphEnv("DEBUG_FRAMES") ??
         spec.graph?.debugFrameEvery ??
         globalStyle.graph?.debugFrameEvery ??
         0,
@@ -553,14 +556,14 @@ export async function renderGraph(
     // it's off by default; the watcher turns it on.
     constraintHints: !["0", "false", "off", "no", ""].includes(
       String(
-        process.env.GRAPHGEN_CONSTRAINT_HINTS ??
+        graphEnv("CONSTRAINT_HINTS") ??
           spec.graph?.constraintHints ??
           globalStyle.graph?.constraintHints ??
           false,
       ).toLowerCase(),
     ),
     minimize: Number(
-      process.env.GRAPHGEN_MINIMIZE ??
+      graphEnv("MINIMIZE") ??
         spec.graph?.minimize ??
         globalStyle.graph?.minimize ??
         100,
@@ -664,6 +667,11 @@ export async function renderGraph(
       boundaryParent: n.parent ?? null,
       width,
       height,
+      borderRadius:
+        style.type === "actor" || style.type === "cylinder"
+          ? 0
+          : (style.borderRadius ?? 6),
+      outline: style.type === "cylinder" ? "cylinder" : undefined,
       // deterministic-ish seed spread so the solver doesn't start degenerate
       x: 200 + (i % 6) * 130 + (i % 3) * 15,
       y: 150 + Math.floor(i / 6) * 130 + (i % 2) * 15,
@@ -974,7 +982,7 @@ export async function renderGraph(
   // main all-constraints phase (i3). We skip the grouped warm-up (i1): it lays
   // groups out as coarse super-nodes and, for a node wired deep into a group
   // (e.g. externalEntity -> ASRV), settles into a local minimum that flings that
-  // node far away. Overridable via GRAPHGEN_ITERS=a,b,c.
+  // node far away. Overridable via GRAPH_GEN_ITERS=a,b,c.
   //
   // WebCola's avoidOverlaps keeps node rectangles from overlapping but lets them
   // touch (zero gap). To enforce a minimum clearance we inflate every node by
@@ -1634,11 +1642,11 @@ export async function renderGraph(
       }
       return stressSeeds.get(linkScale)!;
     };
-    // Optional extra start from a previous layout dump (GRAPHGEN_WARM_START),
+    // Optional extra start from a previous layout dump (GRAPH_GEN_WARM_START),
     // e.g. the same graph before a rule was removed: that layout is still
     // allowed, so including it means the result can't get worse.
     const warmStart: Array<{ x: number; y: number }> | null = (() => {
-      const file = process.env.GRAPHGEN_WARM_START;
+      const file = graphEnv("WARM_START");
       if (!file || !fs.existsSync(file)) return null;
       const dump = JSON.parse(fs.readFileSync(file, "utf8"));
       const byId = new Map<string, any>(dump.nodes.map((n: any) => [n.id, n]));
@@ -1791,7 +1799,7 @@ export async function renderGraph(
       graphMeta.iterations.every(Number.isFinite)
         ? graphMeta.iterations
         : [0, 100, 1000];
-    const envIters = (process.env.GRAPHGEN_ITERS || "").split(",").map(Number);
+    const envIters = (graphEnv("ITERS") || "").split(",").map(Number);
     const [i1, i2, i3] =
       envIters.length === 3 && envIters.every(Number.isFinite)
         ? envIters
@@ -1955,7 +1963,14 @@ export async function renderGraph(
       });
     }
     links.forEach((link, i) => {
-      link.route = finalRoutes[i];
+      link.route =
+        edgeRouting === "orthogonal"
+          ? clipOrthogonalToNodeShapes(
+              finalRoutes[i],
+              resolveNode(link.source),
+              resolveNode(link.target),
+            )
+          : finalRoutes[i];
       const spot = spots[i];
       if (spot) {
         link.labelX = spot.x;
@@ -2106,22 +2121,6 @@ export async function renderGraph(
   }
 
   // -- edge geometry helpers --
-  // intersection of the segment (center -> toward) with the node's rectangle
-  function boundaryPoint(node: any, towardX: number, towardY: number) {
-    const cx = tx(node.x);
-    const cy = ty(node.y);
-    const dx = towardX - cx;
-    const dy = towardY - cy;
-    if (dx === 0 && dy === 0) return { x: cx, y: cy };
-
-    const hw = node.width / 2;
-    const hh = node.height / 2;
-    const scaleX = dx !== 0 ? hw / Math.abs(dx) : Infinity;
-    const scaleY = dy !== 0 ? hh / Math.abs(dy) : Infinity;
-    const scale = Math.min(scaleX, scaleY);
-    return { x: cx + dx * scale, y: cy + dy * scale };
-  }
-
   function drawArrowhead(x: number, y: number, angle: number): void {
     const size = 10;
     ctx.save();
@@ -2242,9 +2241,6 @@ export async function renderGraph(
   for (const link of links) {
     const source = resolveNode(link.source);
     const target = resolveNode(link.target);
-    const sc = { x: tx(source.x), y: ty(source.y) };
-    const tc = { x: tx(target.x), y: ty(target.y) };
-
     const route: EdgeRoute | undefined = link.route;
     const toCanvas = (p: { x: number; y: number }) => ({
       x: tx(p.x),
@@ -2252,7 +2248,10 @@ export async function renderGraph(
     });
     const path = route
       ? route.points.map(toCanvas)
-      : [boundaryPoint(source, tc.x, tc.y), boundaryPoint(target, sc.x, sc.y)];
+      : [
+          toCanvas(nodeBoundaryPoint(source, target)),
+          toCanvas(nodeBoundaryPoint(target, source)),
+        ];
     const p1 = path[0];
     const p2 = path[path.length - 1];
     drawnPaths.push(path);
@@ -2456,7 +2455,8 @@ export async function renderGraph(
   }
 
   // --- optional debug dump (positions + group rects) for testing --------------
-  if (process.env.GRAPHGEN_DUMP) {
+  const dumpPath = graphEnv("DUMP");
+  if (dumpPath) {
     const dump = {
       meta: {
         nodeGap: graphMeta.nodeGap,
@@ -2498,7 +2498,7 @@ export async function renderGraph(
         maxY: r.maxY - offsetY,
       })),
     };
-    fs.writeFileSync(process.env.GRAPHGEN_DUMP, JSON.stringify(dump, null, 2));
+    fs.writeFileSync(dumpPath, JSON.stringify(dump, null, 2));
   }
 
   // --- save -------------------------------------------------------------------

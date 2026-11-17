@@ -47,4 +47,11 @@ describe("handleInfoFlags", () => {
     );
     expect(packageVersion()).toBe(pkg.version);
   });
+
+  it("uses the renamed command and documents legacy environment aliases", () => {
+    const help = helpText("1.2.3");
+    expect(help).toContain("graph-gen --help");
+    expect(help).toContain("GRAPH_GEN_LAYOUT");
+    expect(help).toContain("GRAPHGEN_*");
+  });
 });

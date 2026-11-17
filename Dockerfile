@@ -21,6 +21,6 @@ COPY demo ./demo
 RUN npx tsx src/bundle.ts
 
 # Usage:
-#   docker run -v $(pwd)/out:/app/out graphgen demo/usecases/bookstore_uc1.ggn out/output.png
+#   docker run -v $(pwd)/out:/app/out graph-gen demo/usecases/bookstore_uc1.ggn out/output.png
 ENTRYPOINT ["node", "dist/index.js"]
 CMD ["demo/usecases/bookstore_uc1.ggn", "output.png"]

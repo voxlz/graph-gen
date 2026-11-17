@@ -29,9 +29,9 @@ for (const input of inputs) {
       cwd: rootDir,
       env: {
         ...process.env,
-        GRAPHGEN_LAYOUT: layout,
-        GRAPHGEN_DEBUG_FRAMES: frameEvery,
-        GRAPHGEN_FORCE_DEBUG_FRAMES: forceFrameEvery,
+        GRAPH_GEN_LAYOUT: layout,
+        GRAPH_GEN_DEBUG_FRAMES: frameEvery,
+        GRAPH_GEN_FORCE_DEBUG_FRAMES: forceFrameEvery,
       },
     });
   }

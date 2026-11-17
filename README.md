@@ -1,4 +1,4 @@
-# graphgen
+# graph-gen
 
 Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https://plantuml.com/) and [Mermaid](https://mermaid.js.org/) when you want to store your graphs in code, but want more control over the layout. Initially concaved to produce the scope and use-case diagrams required by the [Axis Security Development Model](https://help.axis.com/en-us/axis-security-development-model).
 
@@ -67,27 +67,27 @@ constraints {
 
 ## Install and run (Docker)
 
-The recommended way to run `graphgen` is via Docker — no local Node or native
+The recommended way to run `graph-gen` is via Docker — no local Node or native
 image libraries required.
 
 Build once:
 
 ```bash
-docker build -t graphgen .
+docker build -t graph-gen .
 ```
 
 Then render, mounting a folder so the PNG lands back on the host:
 
 ```bash
 mkdir -p out
-docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.ggn out/output.png
+docker run --rm -v "$(pwd)/out:/app/out" graph-gen demo/usecases/bookstore_uc1.ggn out/output.png
 ```
 
 The image appears at `./out/output.png` on your machine. Replace the input and
 output paths with your own as needed. Run with `--help` for all arguments and
 environment variables, or `--version` for the installed version.
 
-The output argument is optional. If you omit it, graphgen picks the output path
+The output argument is optional. If you omit it, graph-gen picks the output path
 in this order:
 
 1. CLI output argument (`tsx src/index.ts input.ggn out/output.png`)
@@ -122,7 +122,7 @@ argument (same as the local run):
 
 ```bash
 docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style.jsonc" \
-    graphgen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
+    graph-gen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
 ```
 
 ### Watch for changes
@@ -150,7 +150,7 @@ npx tsx src/index.ts --watch path/to/graphs path/to/renders
 With Docker, mount the graphs and keep the container running:
 
 ```bash
-docker run --rm -v "$(pwd):/work" graphgen --watch /work/graphs /work/renders
+docker run --rm -v "$(pwd):/work" graph-gen --watch /work/graphs /work/renders
 ```
 
 ## Showcase
@@ -282,7 +282,7 @@ when a clear route is available without adding crossings or hiding bends.
 With either engine, labels that still can't touch their edge become label nodes and
 the graph is laid out again: each such label pushes other nodes away and its
 edge is routed through it. This repeats until every label touches its edge. Control this with `labelNodes` in the
-`graph { ... }` block (or `GRAPHGEN_LABEL_NODES`):
+`graph { ... }` block (or `GRAPH_GEN_LABEL_NODES`):
 
 - `auto` (default): only for labels that can't touch their edge otherwise.
 - `true`: always. Every label sits on its edge, at the cost of larger layouts.
@@ -334,37 +334,43 @@ styles; only the file being rendered contributes edges.
   flat constant so high-degree hubs don't fling their neighbours far away.
 - `graph.iterations` — the three WebCola solver passes
   `[unconstrained, userConstraint, allConstraint]` (also overridable at runtime
-  with `GRAPHGEN_ITERS=a,b,c`).
+  with `GRAPH_GEN_ITERS=a,b,c`).
 - `shapes.<name>` — per-shape `color`, `lineStyle` (`solid`/`dashed`),
   `minWidth`, `minHeight`, `borderRadius`, and optional `borderColor`. Unknown
   shapes fall back to a plain box.
 
 ### Layout engines
 
-Set `graph.layout` to choose how nodes are positioned:
+Set `graph.layout` to choose how nodes and edges are arranged:
 
-- `curved` (default) — each edge is a single curve routed around nodes and
-  boundaries, so nodes don't have to be pushed apart to make room for straight
-  edges. Edges never cross each other or pass through nodes, and labels are
-  placed beside their edge. Several starting layouts (WebCola variants and a
-  grid) are compacted and the most compact routed result is kept.
-- `orthogonal` — like `curved`, but edges are horizontal and vertical segments
-  joined by as few 90° bends as possible, connecting at the centre of each
-  node's side. Parallel runs aim to stay at least 6 px apart, except for short
-  shared attachment stubs. Routes favour straight sections of at least 20 px
-  (including beside arrowheads) and balanced bends where obstacles allow.
-  Subpixel alignment differences below 0.5 px do not introduce bends; straight
-  connections stay within 0.25 px of the side centres. Labels keep a 10 px
-  no-turn margin around their padded chips, so edge direction remains visible.
-- `constraint` — straight edges that never cross each other, nodes, or labels.
-  It solves from both a grid and a WebCola starting layout and keeps the more
-  compact result.
-- `cola` — plain WebCola layout pass (edges may cross nodes and labels).
-- `force` — force-directed layout.
+| Engine             | Edge style and crossing behavior                                                                                        | Benefits and trade-offs                                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `curved` (default) | Single smooth curves route around obstacles and penalize crossings.                                                     | A good general-purpose choice for compact diagrams: edges can bend instead of pushing nodes apart. Labels are placed on or beside their edges.                 |
+| `orthogonal`       | Horizontal and vertical segments with 90° bends route around obstacles and strongly penalize crossings.                 | A structured, schematic look that makes direction and parallel connections easy to follow. Detours can add bends or space.                                     |
+| `constraint`       | Straight edges; the solver rejects crossings between edges without a shared endpoint and edges through unrelated nodes. | Useful when straight, crossing-free connections are important. Nodes may need more space, and the solver can fail if it cannot find a valid layout.            |
+| `cola`             | Straight edges from WebCola; edges may cross one another, nodes or labels.                                              | A simple stress-based layout and useful baseline for comparison, especially when compactness matters more than avoiding crossings.                             |
+| `force`            | Straight edges from a force-directed starting layout, followed by constraint repair.                                    | Uses attraction and repulsion to find an arrangement before enforcing the straight-edge constraints. If repair fails, it falls back to a constraint grid seed. |
+
+`curved` and `orthogonal` try to avoid obstacles and crossings, but routing is
+not a guarantee that every graph can be drawn without them. Both try several
+starting layouts and score the routed results for crossings, obstacle hits,
+size and edge length. They also support automatic label nodes to help labels
+touch their edges; see [Edge label placement](#edge-label-placement).
+
+Orthogonal routes favor side-centred connections, separated parallel runs and
+long, balanced sections. Small alignment differences do not introduce extra
+bends, and labels keep a no-turn margin so the edge direction remains visible.
+Choose `curved` for a softer look, `orthogonal` for a diagram-like style, or
+`constraint` when avoiding crossings with straight edges is more important
+than compactness.
+
+Environment variables use the `GRAPH_GEN_` prefix. The former `GRAPHGEN_`
+prefix remains supported as a deprecated alias; if both are set, `GRAPH_GEN_`
+takes precedence.
 
 If the same setting appears in multiple places, this precedence applies:
 
-1. `GRAPHGEN_LAYOUT` environment variable
+1. `GRAPH_GEN_LAYOUT` environment variable
 2. per-graph `graph { layout "..." }`
 3. global style `style.jsonc` (`graph.layout`)
 4. default `curved`
@@ -389,7 +395,7 @@ graph {
 }
 ```
 
-You can also set `graph.layoutIterations` (or `GRAPHGEN_LAYOUT_ITERS`) to
+You can also set `graph.layoutIterations` (or `GRAPH_GEN_LAYOUT_ITERS`) to
 control how many iterations the `constraint` engine can use before stopping.
 
 To compare engines on a folder of graphs, run

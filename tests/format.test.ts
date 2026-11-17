@@ -105,7 +105,7 @@ edges {
 
 describe("formatGraphFile", () => {
   it("rewrites valid parsed graph files", () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graph-gen-"));
     const file = path.join(directory, "graph.ggn");
     fs.writeFileSync(file, "nodes {\nbox customer\n}");
 
@@ -122,7 +122,7 @@ describe("formatGraphFile", () => {
   });
 
   it("does not rewrite already formatted graph files", () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graph-gen-"));
     const file = path.join(directory, "graph.ggn");
     const formattedText = "nodes {\n    box customer\n}\n";
     fs.writeFileSync(file, formattedText);
@@ -140,7 +140,7 @@ describe("formatGraphFile", () => {
   });
 
   it("does not rewrite files with parse errors", () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graph-gen-"));
     const file = path.join(directory, "graph.ggn");
     const invalidText = "nodes {\nbox customer\n";
     fs.writeFileSync(file, invalidText);

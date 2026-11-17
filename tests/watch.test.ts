@@ -9,7 +9,9 @@ import {
 
 describe("watch", () => {
   it("finds .ggn files recursively and ignores other extensions", () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-watch-"));
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graph-gen-watch-"),
+    );
     const nested = path.join(directory, "nested");
     fs.mkdirSync(nested);
     fs.writeFileSync(path.join(directory, "graph.ggn"), "graph {}");
@@ -42,7 +44,9 @@ describe("watch", () => {
   });
 
   it("finds direct and transitive graph importers", () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "graphgen-watch-"));
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "graph-gen-watch-"),
+    );
     const base = path.join(directory, "base.ggn");
     const middle = path.join(directory, "middle.ggn");
     const top = path.join(directory, "top.ggn");

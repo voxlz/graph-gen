@@ -3,7 +3,7 @@
 // Usage: tsx src/benchmark.ts [inputDir=examples] [outputDir=<inputDir>/renders]
 //
 // Every .ggn file under inputDir is rendered with each engine in BENCH_ENGINES
-// (as PNG plus a GRAPHGEN_DUMP layout dump). Metrics per render:
+// (as PNG plus a GRAPH_GEN_DUMP layout dump). Metrics per render:
 //   area      rendered PNG area in megapixels
 //   edgeLen   total drawn edge length (border to border, along curves/bends)
 //   maxEdge   longest visible edge
@@ -53,7 +53,7 @@ async function run(file: string, engine: string): Promise<Metrics> {
   const metrics = await renderAndMeasure(
     file,
     path.join(outputDir, `${rel}_${engine}.png`),
-    { GRAPHGEN_LAYOUT: engine },
+    { GRAPH_GEN_LAYOUT: engine },
   );
   if (metrics.ok) fs.writeFileSync(cacheFile, JSON.stringify(metrics));
   else fs.rmSync(cacheFile, { force: true });
