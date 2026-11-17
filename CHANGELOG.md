@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v4.5.4
+
+- Reduced the Docker image from about 1.4 GB to about 350 MB by building in a
+  separate stage and shipping only the compiled CLI, production dependencies
+  and runtime libraries. Fonts and libraries are unchanged, so renders match.
+- Fixed Docker runs with another working directory (`-w`), such as the
+  documented recursive mode example.
+
 ## v4.5.3
 
 - Build the precompiled CLI bundle automatically before npm packs the package.
