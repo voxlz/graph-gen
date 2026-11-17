@@ -56,4 +56,27 @@ describe("handleInfoFlags", () => {
     expect(help).toContain("GRAPH_GEN_LAYOUT")
     expect(help).toContain("GRAPHGEN_*")
   })
+
+  it("builds an executable CLI that survives rebuilding", () => {
+    buildBundle()
+    expect(fs.statSync(bundlePath).mode & 0o111).not.toBe(0)
+    expect(execFileSync(bundlePath, ["--version"], { encoding: "utf8" })).toBe(
+      `${packageVersion()}\n`,
+    )
+  })
+
+  it("packages the built CLI and its runtime files", () => {
+    const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+      cwd: path.join(__dirname, ".."),
+      encoding: "utf8",
+    })
+    const result: Array<{ files: Array<{ path: string }> }> = JSON.parse(
+      output.slice(output.indexOf("[\n")),
+    )
+    const files = result[0].files.map(file => file.path)
+    expect(files).toEqual(
+      expect.arrayContaining(["dist/index.js", "style.jsonc"]),
+    )
+    expect(files).not.toContain("src/index.ts")
+  }, 30000)
 })
