@@ -1,12 +1,33 @@
 {
-  "name": "graphgen",
-  "version": "4.4.0",
+  "name": "graph-gen",
+  "version": "4.5.0",
   "description": "Constraint-based graph layout -> PNG renderer",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "bin": {
+    "graph-gen": "dist/index.js",
+    "graphgen": "dist/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "style.jsonc",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voxlz/graph-gen.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "commonjs",
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsx src/bundle.ts",
+    "prepack": "npm run build",
     "generate": "tsx src/generate.ts",
     "render-all": "tsx src/render-all.ts",
     "render-frames": "tsx src/render-frames.ts",

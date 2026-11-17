@@ -1,4 +1,4 @@
-// cli.ts — informational command-line flags (--help, --version).
+// cli.ts — command-line flags and help.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -19,6 +19,7 @@ export function helpText(version: string): string {
 Usage:
   graphgen <input.ggn|input.json> [output.png] [style.jsonc]
   graphgen --watch [path] [output-directory]
+  graphgen --recursive [path]
   graphgen --help | --version
 
 Arguments:
@@ -31,6 +32,9 @@ Options:
   -w, --watch    Watch a .ggn file or folder (default: current folder) and
                  re-render graphs, and graphs importing them, on save. PNGs go
                  to output-directory, else each graph's usual output path.
+  -r, --recursive
+                Render all .ggn files recursively under path (default: current
+                folder), using each graph's usual output path, then exit.
   -h, --help     Show this help and exit.
   -v, --version  Print the version and exit.
 
@@ -48,6 +52,10 @@ export function isWatchFlag(arg: string | undefined): boolean {
   return arg === "-w" || arg === "--watch";
 }
 
+export function isRecursiveFlag(arg: string | undefined): boolean {
+  return arg === "-r" || arg === "--recursive";
+}
+
 // Result for an informational flag, or null when the arguments are a normal
 // render. Unknown options are an error instead of being read as a file name.
 export function handleInfoFlags(
@@ -60,6 +68,16 @@ export function handleInfoFlags(
   }
   if (first === "-v" || first === "--version") {
     return { output: `${version}\n`, exitCode: 0, stream: "stdout" };
+  }
+  if (isRecursiveFlag(first)) {
+    if (args.length > 2 || args[1]?.startsWith("-")) {
+      return {
+        output: `graphgen: expected --recursive [path]\n\n${helpText(version)}`,
+        exitCode: 2,
+        stream: "stderr",
+      };
+    }
+    return null;
   }
   if (first?.startsWith("-") && first !== "-" && !isWatchFlag(first)) {
     return {

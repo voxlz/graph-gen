@@ -1,6 +1,8 @@
+#!/usr/bin/env node
 // index.ts
 // Usage: tsx src/index.ts <input.ggn|input.json> [output.png] [style.jsonc]
 //        tsx src/index.ts --watch [path] [output-directory]
+//        tsx src/index.ts --recursive [path]
 //        tsx src/index.ts --help | --version
 //
 // Pipeline:
@@ -11,7 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { handleInfoFlags, isWatchFlag } from "./cli";
+import { handleInfoFlags, isRecursiveFlag, isWatchFlag } from "./cli";
 import { formatGraphFile } from "./format";
 import { resolveOutputPath } from "./output";
 import {
@@ -22,6 +24,7 @@ import {
   type ParseResult,
 } from "./parse";
 import { renderErrorGraph, renderGraph } from "./render";
+import { renderRecursively } from "./recursive";
 import { validateGraph, type DiagnosticLocation } from "./validate";
 import { startWatch } from "./watch";
 
@@ -262,4 +265,6 @@ function renderFromArguments() {
 
 const args = process.argv.slice(2);
 if (isWatchFlag(args[0])) startWatch(args[1], args[2]);
+else if (isRecursiveFlag(args[0]))
+  process.exitCode = renderRecursively(args[1]);
 else renderFromArguments();

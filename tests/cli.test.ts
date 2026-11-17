@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   handleInfoFlags,
   helpText,
+  isRecursiveFlag,
   isWatchFlag,
   packageVersion,
 } from "../src/cli";
@@ -39,6 +40,23 @@ describe("handleInfoFlags", () => {
   it.each(["--watch", "-w"])("accepts %s as watch mode", (flag) => {
     expect(isWatchFlag(flag)).toBe(true);
     expect(handleInfoFlags([flag, "graphs"], "1.2.3")).toBeNull();
+  });
+
+  it.each(["--recursive", "-r"])("accepts %s as recursive mode", (flag) => {
+    expect(isRecursiveFlag(flag)).toBe(true);
+    expect(handleInfoFlags([flag, "."], "1.2.3")).toBeNull();
+    expect(handleInfoFlags([flag], "1.2.3")).toBeNull();
+  });
+
+  it.each([
+    ["-r", ".", "out"],
+    ["--recursive", "--unknown"],
+  ])("rejects invalid recursive arguments %j", (...args) => {
+    expect(handleInfoFlags(args, "1.2.3")).toEqual({
+      output: expect.stringContaining("expected --recursive [path]"),
+      exitCode: 2,
+      stream: "stderr",
+    });
   });
 
   it("reads the version from package.json", () => {

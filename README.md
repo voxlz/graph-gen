@@ -1,6 +1,6 @@
-# graphgen
+# graph-gen
 
-Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https://plantuml.com/) and [Mermaid](https://mermaid.js.org/) when you want to store your graphs in code, but want more control over the layout. Initially concaved to produce the scope and use-case diagrams required by the [Axis Security Development Model](https://help.axis.com/en-us/axis-security-development-model).
+Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https://plantuml.com/) and [Mermaid](https://mermaid.js.org/) when you want to store and generate your graphs from code, but want deterministic constraint control over the layout. Initially conceived to produce the scope and use-case diagrams required by certain threat modeling requirements.
 
 ## Example
 
@@ -65,32 +65,59 @@ constraints {
 }
 ```
 
-## Install and run (Docker)
+## Install and run (npm)
 
-The recommended way to run `graphgen` is via Docker — no local Node or native
-image libraries required.
-
-Build once:
+The recommended way to run graphgen is with Node.js 20 or newer and `npx`—no
+repository clone is needed:
 
 ```bash
-docker build -t graphgen .
+npx graph-gen path/to/graph.ggn
+npx graph-gen -r .
+npx graph-gen --watch path/to/graphs
+npx graph-gen --help
+```
+
+Or install the `graph-gen` command globally:
+
+```bash
+npm install -g graph-gen
+graph-gen -r .
+```
+
+The unscoped npm name `graphgen` belongs to a different project; use
+`npx graph-gen`, not `npx graphgen`.
+
+The npm package includes the compiled CLI and default styles. Rendering uses
+`canvas`: supported platforms use prebuilt native binaries; other platforms
+need its [native build prerequisites](https://github.com/Automattic/node-canvas#compiling).
+Docker remains available if you prefer not to install native dependencies.
+
+## Install and run (Docker)
+
+Docker is an alternative that requires no local Node or native image libraries.
+Pull the published image:
+
+```bash
+docker pull ghcr.io/voxlz/graph-gen:latest
 ```
 
 Then render, mounting a folder so the PNG lands back on the host:
 
 ```bash
 mkdir -p out
-docker run --rm -v "$(pwd)/out:/app/out" graphgen demo/usecases/bookstore_uc1.ggn out/output.png
+docker run --rm -v "$(pwd)/out:/app/out" ghcr.io/voxlz/graph-gen:latest demo/usecases/bookstore_uc1.ggn out/output.png
 ```
 
 The image appears at `./out/output.png` on your machine. Replace the input and
 output paths with your own as needed. Run with `--help` for all arguments and
 environment variables, or `--version` for the installed version.
 
+## Output paths
+
 The output argument is optional. If you omit it, graphgen picks the output path
 in this order:
 
-1. CLI output argument (`tsx src/index.ts input.ggn out/output.png`)
+1. CLI output argument (`npx graph-gen input.ggn out/output.png`)
 2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
 3. Global style setting (`style.jsonc` -> `graph.outputPath`)
 4. Built-in fallback (`../graphs/{file}`)
@@ -117,40 +144,83 @@ graph {
 }
 ```
 
-To override the styles, mount your own style file and pass it as the third
-argument (same as the local run):
+To override the bundled styles, pass a style file as the third argument:
+
+```bash
+npx graph-gen input.ggn out/output.png my-style.jsonc
+```
+
+With Docker, mount the style file:
 
 ```bash
 docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style.jsonc" \
-    graphgen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
+    ghcr.io/voxlz/graph-gen:latest demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
 ```
 
-### Watch for changes
+## Render a directory recursively
 
-For local development, run:
+Use `--recursive` (or `-r`) to regenerate every `.ggn` file under a directory,
+including nested directories, then exit:
 
 ```bash
-npm run watch
+npx graph-gen -r path/to/graphs
+npx graph-gen -r .
 ```
 
-This watches the current project and mirrors generated images into `renders/`.
-To watch another path while respecting each graph's `outputPath`, the global
-`style.jsonc` setting, and the built-in default, use `--watch` (or `-w`):
+Omitting the path uses the current directory. Each graph uses its configured
+output path or the usual default, and its configured layout (curved by default).
+Like single-file rendering, this also formats the input files and resolves their
+imports. All directories are searched; symbolic links are not followed.
+Rendering continues after a failed render, with a nonzero exit status if any fail.
+
+With Docker, mount your project and set the working directory so `.` refers to
+the mounted project:
 
 ```bash
-npx tsx src/index.ts --watch path/to/graphs
+docker run --rm -v "$(pwd):/work" -w /work ghcr.io/voxlz/graph-gen:latest -r .
+```
+
+Mount a parent directory as well if your configured output paths lead outside
+the project directory.
+
+## Watch for changes
+
+Use `--watch` (or `-w`) to watch a path while respecting each graph's
+`outputPath`, the global `style.jsonc` setting, and the built-in default:
+
+```bash
+npx graph-gen --watch path/to/graphs
 ```
 
 You can also provide an output directory explicitly:
 
 ```bash
-npx tsx src/index.ts --watch path/to/graphs path/to/renders
+npx graph-gen --watch path/to/graphs path/to/renders
 ```
 
 With Docker, mount the graphs and keep the container running:
 
 ```bash
-docker run --rm -v "$(pwd):/work" graphgen --watch /work/graphs /work/renders
+docker run --rm -v "$(pwd):/work" ghcr.io/voxlz/graph-gen:latest --watch /work/graphs /work/renders
+```
+
+## Publishing releases
+
+Version tags (`v*`) publish Docker images and the public npm package
+`graph-gen` through separate GitHub Actions workflows. The tag must match
+the version in `package.json`; update the lockfile and changelog before tagging.
+The npm workflow runs lint, typecheck and tests, then builds the CLI through
+`prepack` and publishes it with provenance.
+
+Before the first npm release, configure the repository Actions secret
+`NPM_TOKEN` with a granular npm access token authorized to create/publish the
+unscoped `graph-gen` package. The token must permit non-interactive
+publishing (including bypassing 2FA where required). Do not commit the token.
+
+To inspect the package locally without publishing:
+
+```bash
+npm pack --dry-run
 ```
 
 ## Showcase
@@ -392,19 +462,20 @@ graph {
 You can also set `graph.layoutIterations` (or `GRAPHGEN_LAYOUT_ITERS`) to
 control how many iterations the `constraint` engine can use before stopping.
 
-To compare engines on a folder of graphs, run
+From a repository checkout, to compare engines on a folder of graphs, run
 `npm run benchmark -- <folder>`. It renders every `.ggn` file with each
 engine in `BENCH_ENGINES` (default `curved,cola`) and reports image area,
 edge lengths, crossings, edges through nodes, label collisions, and layout time.
 `BENCH_FILTER` limits the graphs, `BENCH_JOBS=1` gives reliable timings, and
 Cola results are cached (`BENCH_FRESH=1` re-renders them).
 
-For faster renders, `npm run build` precompiles the renderer into
+For development from a repository checkout, `npm run build` precompiles the renderer into
 `dist/index.js`; run it with `node dist/index.js <input> [output]` instead of
 `tsx src/index.ts` to skip TypeScript transpilation on every run. The watcher,
 `render-all`, `generate` and the benchmark do this automatically, rebuilding
 the bundle when the source changes, and the watcher renders up to four changed
 graphs in parallel.
+The npm and Docker packages already include the precompiled renderer.
 
 A graph's own `shapes { ... }` block overrides global shape defaults for that
 graph only, and a custom style file can be passed per render (the optional third

@@ -12,7 +12,10 @@ const rootDir = path.resolve(__dirname, "..");
 const RED = "\x1b[31m";
 const RESET = "\x1b[0m";
 
-export function findGraphFiles(targetPath: string): string[] {
+export function findGraphFiles(
+  targetPath: string,
+  ignoredDirectories = ["node_modules", "renders"],
+): string[] {
   const stat = fs.statSync(targetPath);
   if (stat.isFile()) {
     return path.extname(targetPath).toLowerCase() === ".ggn"
@@ -22,11 +25,11 @@ export function findGraphFiles(targetPath: string): string[] {
 
   const files: string[] = [];
   for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === "renders") continue;
+    if (ignoredDirectories.includes(entry.name)) continue;
 
     const file = path.join(targetPath, entry.name);
     if (entry.isDirectory()) {
-      files.push(...findGraphFiles(file));
+      files.push(...findGraphFiles(file, ignoredDirectories));
     } else if (
       entry.isFile() &&
       path.extname(entry.name).toLowerCase() === ".ggn"

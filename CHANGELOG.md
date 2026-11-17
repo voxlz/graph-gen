@@ -1,5 +1,14 @@
 # Changelog
 
+## v4.5.0
+
+- Added `-r` / `--recursive [path]` to regenerate every `.ggn` file under a
+  directory using each graph's usual output path.
+- Added the public npm package `graph-gen`, providing the `graph-gen`
+  command and `npx graph-gen`, including recursive and watch modes.
+- Added npm publishing with provenance on version tags, alongside Docker
+  publishing. Repository setup requires an `NPM_TOKEN` Actions secret.
+
 ## v4.4.0
 
 - Group titles are now label obstacles in every render mode: nodes, edges and

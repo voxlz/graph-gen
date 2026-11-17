@@ -30,6 +30,7 @@ function newestSourceTime(dir: string): number {
 
 function bundleIsCurrent(): boolean {
   if (!fs.existsSync(bundlePath)) return false;
+  if (!fs.existsSync(sourceDir)) return true;
   const built = fs.statSync(bundlePath).mtimeMs;
   const packageTime = fs.statSync(path.join(rootDir, "package.json")).mtimeMs;
   return built >= Math.max(newestSourceTime(sourceDir), packageTime);
@@ -55,6 +56,7 @@ export function buildBundle(): void {
     logLevel: "warning",
   });
   fs.renameSync(temporary, bundlePath);
+  fs.chmodSync(bundlePath, 0o755);
 }
 
 // Command that renders one graph: `<command> ...args <input> [output]`.
