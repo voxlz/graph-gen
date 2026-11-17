@@ -1,8 +1,142 @@
 # graph-gen
 
-Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https://plantuml.com/) and [Mermaid](https://mermaid.js.org/) when you want to store your graphs in code, but want more control over the layout. Initially concaved to produce the scope and use-case diagrams required by the [Axis Security Development Model](https://help.axis.com/en-us/axis-security-development-model).
+Constraint-based graph layout → PNG renderer. Alternative to [PlantUML](https://plantuml.com/) and [Mermaid](https://mermaid.js.org/) when you want to store your graphs in code, but want more control over the layout. Initially conceived to produce the scope and use-case diagrams required by the [Axis Security Development Model](https://help.axis.com/en-us/axis-security-development-model).
 
-## Example
+## Install
+
+Choose either npm or Docker.
+
+### npm
+
+Install [Node.js and npm](https://nodejs.org/) (Node.js 20.19+, 22.13+ or
+24+). Once `graph-gen` is published to npm, install its prebuilt CLI globally:
+
+```bash
+npm install -g graph-gen
+```
+
+Ensure npm's global bin directory is on your `PATH`. Before the first npm
+release, you can instead install from a source checkout:
+
+```bash
+git clone https://github.com/voxlz/graph-gen.git
+cd graph-gen
+npm ci
+npm run build
+npm link
+```
+
+The linked command depends on that checkout; rerun `npm run build` after
+updating the source. If the native `canvas` dependency cannot be installed, see the
+[node-canvas installation instructions](https://github.com/Automattic/node-canvas#installation).
+
+### Docker
+
+Install [Docker](https://docs.docker.com/get-docker/) and start its daemon, then
+clone the repository and build the image:
+
+```bash
+git clone https://github.com/voxlz/graph-gen.git
+cd graph-gen
+docker build -t graph-gen .
+```
+
+Define this shell function to expose the same `graph-gen` command. Add it to
+your shell's startup file to keep it available in future sessions:
+
+```bash
+graph-gen() {
+    docker run --rm -i -v "$PWD:/work" -w /work \
+        -e GRAPH_GEN_LAYOUT -e GRAPH_GEN_LAYOUT_ITERS \
+        -e GRAPH_GEN_ITERS -e GRAPH_GEN_LABEL_NODES \
+        -e GRAPH_GEN_CONSTRAINT_HINTS -e GRAPH_GEN_MINIMIZE \
+        -e GRAPH_GEN_DEBUG_FRAMES -e GRAPH_GEN_FORCE_DEBUG_FRAMES \
+        -e GRAPH_GEN_DUMP -e GRAPH_GEN_WARM_START \
+        -e GRAPHGEN_LAYOUT -e GRAPHGEN_LAYOUT_ITERS \
+        -e GRAPHGEN_ITERS -e GRAPHGEN_LABEL_NODES \
+        -e GRAPHGEN_CONSTRAINT_HINTS -e GRAPHGEN_MINIMIZE \
+        -e GRAPHGEN_DEBUG_FRAMES -e GRAPHGEN_FORCE_DEBUG_FRAMES \
+        -e GRAPHGEN_DUMP -e GRAPHGEN_WARM_START \
+        graph-gen "$@"
+}
+```
+
+The function mounts the current directory at `/work`. Run it from a directory
+containing the input, imported graphs, custom style and output paths; use paths
+relative to that directory. Files outside it, including the default `../graphs`
+output directory, are not available on the host unless separately mounted.
+Environment-variable file paths must also refer to paths inside `/work`.
+
+## Run
+
+From a directory containing a graph:
+
+```bash
+graph-gen graph.ggn out/graph.png
+graph-gen --help
+graph-gen --version
+```
+
+The renderer formats `.ggn` input files in place. The output directory is
+created if needed.
+
+The output argument is optional. If you omit it, graph-gen picks the output path
+in this order:
+
+1. CLI output argument (`graph-gen input.ggn out/output.png`)
+2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
+3. Global style setting (`style.jsonc` -> `graph.outputPath`)
+4. Built-in fallback (`../graphs/{file}`)
+
+`{file}` expands to the input filename with a `.png` extension. For example,
+`checkout_scope.ggn` becomes `checkout_scope.png`. Relative paths are resolved
+from the input graph's directory.
+
+Example global default in `style.jsonc`:
+
+```jsonc
+{
+  "graph": {
+    "outputPath": "../graphs/{file}",
+  },
+}
+```
+
+Example per-graph override:
+
+```text
+graph {
+        outputPath "./renders/{file}"
+}
+```
+
+To override the styles, pass a style file as the third argument:
+
+```bash
+graph-gen graph.ggn out/graph.png my-style.jsonc
+```
+
+### Watch for changes
+
+Use `--watch` (or `-w`) to watch a file or directory, respecting each graph's
+`outputPath`, the global `style.jsonc` setting, and the built-in default:
+
+```bash
+graph-gen --watch path/to/graphs
+```
+
+You can also provide an output directory explicitly:
+
+```bash
+graph-gen --watch path/to/graphs path/to/renders
+```
+
+With the Docker function, specify an output directory inside the mounted
+current directory and keep the command running.
+
+## Showcase
+
+### Example
 
 ![Checkout example](renders/demo/showcase/example.png)
 
@@ -64,96 +198,6 @@ constraints {
     attacker left api
 }
 ```
-
-## Install and run (Docker)
-
-The recommended way to run `graph-gen` is via Docker — no local Node or native
-image libraries required.
-
-Build once:
-
-```bash
-docker build -t graph-gen .
-```
-
-Then render, mounting a folder so the PNG lands back on the host:
-
-```bash
-mkdir -p out
-docker run --rm -v "$(pwd)/out:/app/out" graph-gen demo/usecases/bookstore_uc1.ggn out/output.png
-```
-
-The image appears at `./out/output.png` on your machine. Replace the input and
-output paths with your own as needed. Run with `--help` for all arguments and
-environment variables, or `--version` for the installed version.
-
-The output argument is optional. If you omit it, graph-gen picks the output path
-in this order:
-
-1. CLI output argument (`tsx src/index.ts input.ggn out/output.png`)
-2. Graph-local setting (`graph { outputPath "..." }` inside the rendered `.ggn`)
-3. Global style setting (`style.jsonc` -> `graph.outputPath`)
-4. Built-in fallback (`../graphs/{file}`)
-
-`{file}` expands to the input filename with a `.png` extension. For example,
-`checkout_scope.ggn` becomes `checkout_scope.png`. Relative paths are resolved
-from the input graph's directory.
-
-Example global default in `style.jsonc`:
-
-```jsonc
-{
-  "graph": {
-    "outputPath": "../graphs/{file}",
-  },
-}
-```
-
-Example per-graph override:
-
-```text
-graph {
-        outputPath "./renders/{file}"
-}
-```
-
-To override the styles, mount your own style file and pass it as the third
-argument (same as the local run):
-
-```bash
-docker run --rm -v "$(pwd)/out:/app/out" -v "$(pwd)/my-style.jsonc:/app/my-style.jsonc" \
-    graph-gen demo/usecases/bookstore_uc1.ggn out/output.png my-style.jsonc
-```
-
-### Watch for changes
-
-For local development, run:
-
-```bash
-npm run watch
-```
-
-This watches the current project and mirrors generated images into `renders/`.
-To watch another path while respecting each graph's `outputPath`, the global
-`style.jsonc` setting, and the built-in default, use `--watch` (or `-w`):
-
-```bash
-npx tsx src/index.ts --watch path/to/graphs
-```
-
-You can also provide an output directory explicitly:
-
-```bash
-npx tsx src/index.ts --watch path/to/graphs path/to/renders
-```
-
-With Docker, mount the graphs and keep the container running:
-
-```bash
-docker run --rm -v "$(pwd):/work" graph-gen --watch /work/graphs /work/renders
-```
-
-## Showcase
 
 ### Nodes
 
@@ -398,19 +442,16 @@ graph {
 You can also set `graph.layoutIterations` (or `GRAPH_GEN_LAYOUT_ITERS`) to
 control how many iterations the `constraint` engine can use before stopping.
 
-To compare engines on a folder of graphs, run
+From a source checkout, to compare engines on a folder of graphs, run
 `npm run benchmark -- <folder>`. It renders every `.ggn` file with each
 engine in `BENCH_ENGINES` (default `curved,cola`) and reports image area,
 edge lengths, crossings, edges through nodes, label collisions, and layout time.
 `BENCH_FILTER` limits the graphs, `BENCH_JOBS=1` gives reliable timings, and
 Cola results are cached (`BENCH_FRESH=1` re-renders them).
 
-For faster renders, `npm run build` precompiles the renderer into
-`dist/index.js`; run it with `node dist/index.js <input> [output]` instead of
-`tsx src/index.ts` to skip TypeScript transpilation on every run. The watcher,
-`render-all`, `generate` and the benchmark do this automatically, rebuilding
-the bundle when the source changes, and the watcher renders up to four changed
-graphs in parallel.
+The installed CLI uses a precompiled renderer. In a source checkout, the
+watcher, `render-all`, `generate` and benchmark rebuild the bundle when the
+source changes; the watcher renders up to four changed graphs in parallel.
 
 A graph's own `shapes { ... }` block overrides global shape defaults for that
 graph only, and a custom style file can be passed per render (the optional third

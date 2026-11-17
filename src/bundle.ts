@@ -30,6 +30,7 @@ function newestSourceTime(dir: string): number {
 
 function bundleIsCurrent(): boolean {
   if (!fs.existsSync(bundlePath)) return false;
+  if (!fs.existsSync(sourceDir)) return true;
   const built = fs.statSync(bundlePath).mtimeMs;
   const packageTime = fs.statSync(path.join(rootDir, "package.json")).mtimeMs;
   return built >= Math.max(newestSourceTime(sourceDir), packageTime);
@@ -49,11 +50,13 @@ export function buildBundle(): void {
     platform: "node",
     target: "node20",
     format: "cjs",
+    banner: { js: "#!/usr/bin/env node" },
     // esbuild is only needed to (re)build this bundle from the watcher.
     external: ["canvas", "esbuild"],
     outfile: temporary,
     logLevel: "warning",
   });
+  fs.chmodSync(temporary, 0o755);
   fs.renameSync(temporary, bundlePath);
 }
 

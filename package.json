@@ -2,7 +2,14 @@
   "name": "graph-gen",
   "version": "4.4.0",
   "description": "Constraint-based graph layout -> PNG renderer",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "bin": {
+    "graph-gen": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "style.jsonc"
+  ],
   "type": "commonjs",
   "scripts": {
     "start": "tsx src/index.ts",
@@ -19,6 +26,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
     "prepare": "husky"
   },
   "dependencies": {
