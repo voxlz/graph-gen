@@ -811,7 +811,8 @@ constraints {
     const cacheRect = rect(cache);
     const neighborGaps = minimized.nodes
       .filter(
-        (node) => node !== cache && node.boundaryParent === cache.boundaryParent,
+        (node) =>
+          node !== cache && node.boundaryParent === cache.boundaryParent,
       )
       .flatMap((node) => {
         const other = rect(node);
@@ -823,10 +824,7 @@ constraints {
           other.minY - cacheRect.maxY,
           cacheRect.minY - other.maxY,
         );
-        return [
-          ...(yGap < 0 ? [xGap] : []),
-          ...(xGap < 0 ? [yGap] : []),
-        ];
+        return [...(yGap < 0 ? [xGap] : []), ...(xGap < 0 ? [yGap] : [])];
       });
 
     expect(minimized.result.violations).toEqual([]);
