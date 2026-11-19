@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The watcher prioritizes directly saved graphs over queued dependency-triggered
+  rerenders without interrupting renders already in progress.
+
 ## v4.5.4
 
 - Reduced the Docker image from about 1.4 GB to about 350 MB by building in a

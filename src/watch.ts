@@ -160,6 +160,7 @@ export function startWatch(
   const watchedFile = targetStat.isFile() ? target : undefined;
   const renderer = rendererCommand();
   const queued = new Set<string>();
+  const changedFiles = new Set<string>();
   const rendering = new Set<string>();
   const timers = new Map<string, NodeJS.Timeout>();
 
@@ -167,9 +168,14 @@ export function startWatch(
   // more afterwards, so the last render always reflects the latest contents.
   const processQueue = () => {
     while (rendering.size < MAX_PARALLEL_RENDERS) {
-      const next = [...queued].sort().find((file) => !rendering.has(file));
+      const available = [...queued]
+        .sort()
+        .filter((file) => !rendering.has(file));
+      const next =
+        available.find((file) => changedFiles.has(file)) ?? available[0];
       if (!next) return;
       queued.delete(next);
+      changedFiles.delete(next);
       rendering.add(next);
       void renderGraph(renderer, next, outputDirectory).then(() => {
         rendering.delete(next);
@@ -180,6 +186,7 @@ export function startWatch(
 
   const queueFile = (file: string, includeDependents = true) => {
     if (path.extname(file).toLowerCase() !== ".ggn") return;
+    if (includeDependents) changedFiles.add(file);
     const previous = timers.get(file);
     if (previous) clearTimeout(previous);
 
@@ -187,7 +194,10 @@ export function startWatch(
       file,
       setTimeout(() => {
         timers.delete(file);
-        if (!fs.existsSync(file)) return;
+        if (!fs.existsSync(file)) {
+          changedFiles.delete(file);
+          return;
+        }
         queued.add(file);
         if (includeDependents) {
           const graphFiles = findGraphFiles(target);

@@ -195,6 +195,9 @@ Use `--watch` (or `-w`) to watch a path while respecting each graph's
 npx @voxlz/graph-gen --watch path/to/graphs
 ```
 
+Saved graphs take priority over queued dependency-triggered rerenders.
+Renders already in progress finish normally.
+
 You can also provide an output directory explicitly:
 
 ```bash
